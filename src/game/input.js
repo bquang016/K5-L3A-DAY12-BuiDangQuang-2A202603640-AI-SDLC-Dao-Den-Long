@@ -1,18 +1,18 @@
+import { DEFAULT_KEYBINDS, normalizeKeybinds } from './keybinds.js';
+
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+function isTypingTarget(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 /**
- * Keyboard & pointer controls with Pointer Lock (hidden cursor 360 free-look + pitch + scroll zoom)
- * and drag-orbit fallback.
- * - WASD / Arrows: Move
- * - Space: Jump
- * - Shift: Dash
- * - E (or F/Enter): Interact / Deposit into lantern
- * - Q (or X): Radiant Pulse
- * - C: Toggle Pointer Lock (hide/show cursor camera mode)
- * - Esc / P: Pause toggle
- * - M: Mute toggle
+ * Keyboard & pointer controls with Pointer Lock (hidden cursor 360 free-look + pitch + scroll zoom),
+ * drag-orbit fallback, and full 9-action accessibility key rebinding.
  */
 export class InputController {
   constructor(
@@ -23,7 +23,8 @@ export class InputController {
       onPointerLockChange,
       onPointerLockModeToggle,
       mouseSensitivity = 1.0,
-      pointerLockEnabled = true
+      pointerLockEnabled = true,
+      keybinds = DEFAULT_KEYBINDS
     } = {}
   ) {
     this.domElement = domElement;
@@ -34,6 +35,9 @@ export class InputController {
 
     this.mouseSensitivity = mouseSensitivity;
     this.pointerLockEnabled = pointerLockEnabled;
+    this.keybinds = normalizeKeybinds(keybinds);
+    this._boundCodes = new Set(Object.values(this.keybinds));
+    this.isRebinding = false;
     this.isPointerLocked = false;
     this._ignoreNextUnlockPause = false;
 
@@ -43,7 +47,7 @@ export class InputController {
     this.pendingPulse = false;
     this.pendingDash = false;
 
-    this.camYawDeg = 180; // Look along +Z initially (matches Mây facing +Z)
+    this.camYawDeg = 180;
     this.camPitchDeg = 24;
     this.camDist = 10.5;
 
@@ -74,6 +78,19 @@ export class InputController {
 
   setMouseSensitivity(val) {
     this.mouseSensitivity = val;
+  }
+
+  setKeybinds(next) {
+    this.keybinds = normalizeKeybinds(next);
+    this._boundCodes = new Set(Object.values(this.keybinds));
+    this.keys.clear();
+  }
+
+  setRebinding(active) {
+    this.isRebinding = Boolean(active);
+    if (this.isRebinding) {
+      this.keys.clear();
+    }
   }
 
   setPointerLockEnabled(enabled) {
@@ -120,29 +137,41 @@ export class InputController {
     this.onPointerLockChange?.(locked, { userExited });
   }
 
+  _matchesAction(code, primary, aliases = []) {
+    if (code === primary) return true;
+    for (const alt of aliases) {
+      if (code === alt && !this._boundCodes.has(alt)) return true;
+    }
+    return false;
+  }
+
   _handleKeyDown(e) {
+    if (this.isRebinding || isTypingTarget(document.activeElement)) {
+      return;
+    }
     if (e.code === 'Space' || e.code.startsWith('Arrow')) {
       e.preventDefault();
     }
+    const kb = this.keybinds;
     if (!e.repeat) {
-      if (e.code === 'Space') this.pendingJump = true;
-      if (e.code === 'KeyE' || e.code === 'KeyF' || e.code === 'Enter') {
+      if (this._matchesAction(e.code, kb.jump)) this.pendingJump = true;
+      if (this._matchesAction(e.code, kb.interact, ['KeyF', 'Enter'])) {
         this.pendingInteract = true;
       }
-      if (e.code === 'KeyQ' || e.code === 'KeyX') {
+      if (this._matchesAction(e.code, kb.pulse, ['KeyX'])) {
         this.pendingPulse = true;
       }
-      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+      if (this._matchesAction(e.code, kb.dash, ['ShiftRight'])) {
         this.pendingDash = true;
       }
-      if (e.code === 'KeyC') {
+      if (e.code === 'KeyC' && !this._boundCodes.has('KeyC')) {
         this.setPointerLockEnabled(!this.pointerLockEnabled);
         this.onPointerLockModeToggle?.(this.pointerLockEnabled);
       }
-      if ((e.code === 'Escape' || e.code === 'KeyP') && this.onPauseToggle) {
+      if (this._matchesAction(e.code, kb.pause, ['KeyP']) && this.onPauseToggle) {
         this.onPauseToggle();
       }
-      if (e.code === 'KeyM' && this.onMuteToggle) {
+      if (e.code === 'KeyM' && !this._boundCodes.has('KeyM') && this.onMuteToggle) {
         this.onMuteToggle();
       }
     }
@@ -207,21 +236,30 @@ export class InputController {
     };
   }
 
+  _isActionHeld(primary, aliases = []) {
+    if (this.keys.has(primary)) return true;
+    for (const alt of aliases) {
+      if (this.keys.has(alt) && !this._boundCodes.has(alt)) return true;
+    }
+    return false;
+  }
+
   sampleTickInput(dt) {
     if (this.keys.has('BracketLeft')) this.camYawDeg += 95 * dt;
     if (this.keys.has('BracketRight')) this.camYawDeg -= 95 * dt;
 
+    const kb = this.keybinds;
     let x = 0;
     let z = 0;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) x -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) x += 1;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) z -= 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) z += 1;
+    if (this._isActionHeld(kb.moveLeft, ['ArrowLeft'])) x -= 1;
+    if (this._isActionHeld(kb.moveRight, ['ArrowRight'])) x += 1;
+    if (this._isActionHeld(kb.moveUp, ['ArrowUp'])) z -= 1;
+    if (this._isActionHeld(kb.moveDown, ['ArrowDown'])) z += 1;
 
-    const heldJump = this.keys.has('Space');
-    const heldInteract = this.keys.has('KeyE') || this.keys.has('KeyF') || this.keys.has('Enter');
-    const heldPulse = this.keys.has('KeyQ') || this.keys.has('KeyX');
-    const heldDash = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const heldJump = this._isActionHeld(kb.jump);
+    const heldInteract = this._isActionHeld(kb.interact, ['KeyF', 'Enter']);
+    const heldPulse = this._isActionHeld(kb.pulse, ['KeyX']);
+    const heldDash = this._isActionHeld(kb.dash, ['ShiftRight']);
 
     const input = {
       move: [x, z],

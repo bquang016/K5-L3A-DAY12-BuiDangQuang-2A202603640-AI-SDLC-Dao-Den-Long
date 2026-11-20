@@ -1,5 +1,14 @@
 import { FUEL_SCALE, LOW_FUEL_60 } from '../sim/config.js';
 import { distXZ } from '../sim/math.js';
+import {
+  ACTION_LABELS,
+  DEFAULT_KEYBINDS,
+  findKeybindConflicts,
+  formatKeyCode,
+  KEYBIND_ACTIONS,
+  normalizeKeybinds
+} from './keybinds.js';
+import { validateLeaderboardName } from './leaderboard.js';
 
 const NIGHT_INTROS = {
   1: {
@@ -21,8 +30,34 @@ const NIGHT_INTROS = {
 
 const SVG_FLAME = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 2C12.5 2 18 7.2 18 13a6 6 0 1 1-12 0c0-3.2 1.8-6.1 3.7-8.1-.2 1.8.8 3.2 2.1 3.7C11.2 6.5 12.5 2 12.5 2Z"/></svg>`;
 const SVG_LANTERN = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 2h6v2h-6V2Zm-2 4h10l1.5 3v9L16 21H8l-2.5-3V9L7 6Zm3 17h4v1h-4v-1Z"/></svg>`;
-const SVG_DASH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 10-12h-6l0-8Z"/></svg>`;
-const SVG_PULSE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2Z"/></svg>`;
+const SVG_DASH = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 10-12h-6l0-8Z"/></svg>`;
+const SVG_PULSE = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2Z"/></svg>`;
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function positionEdgeArrow(el, proj) {
+  const cx = proj.w / 2;
+  const cy = proj.h / 2;
+  const dx = Math.cos(proj.angleRad);
+  const dy = Math.sin(proj.angleRad);
+  const maxLeft = Math.max(80, cx - 54);
+  const maxRight = Math.max(80, cx - 54);
+  const maxTop = Math.max(80, cy - 112);
+  const maxBottom = Math.max(80, cy - 148);
+  const rx = dx > 1e-4 ? maxRight / dx : dx < -1e-4 ? maxLeft / -dx : 9999;
+  const ry = dy > 1e-4 ? maxBottom / dy : dy < -1e-4 ? maxTop / -dy : 9999;
+  const t = Math.min(rx, ry);
+  el.style.display = 'flex';
+  el.style.left = `${cx + dx * t - 19}px`;
+  el.style.top = `${cy + dy * t - 19}px`;
+  el.style.transform = `rotate(${(proj.angleRad * 180) / Math.PI}deg)`;
+}
 
 export class GameHud {
   constructor(
@@ -36,7 +71,10 @@ export class GameHud {
       onRestartNight,
       onNextNight,
       onBackToMenu,
-      onSettingsChange
+      onSettingsChange,
+      onRebindStateChange,
+      onOpenLeaderboard,
+      onSaveLeaderboardScore
     } = {}
   ) {
     this.root = root;
@@ -49,12 +87,18 @@ export class GameHud {
       onRestartNight,
       onNextNight,
       onBackToMenu,
-      onSettingsChange
+      onSettingsChange,
+      onRebindStateChange,
+      onOpenLeaderboard,
+      onSaveLeaderboardScore
     };
 
     this.whisperTimer = 0;
     this.flashTimer = 0;
+    this.shadeAlert = null; // { id, pos, timer }
     this.settingsOrigin = 'menu';
+    this.listeningAction = null;
+    this._keyCaptureHandler = null;
 
     this._buildDom();
   }
@@ -92,22 +136,24 @@ export class GameHud {
         </div>
       </div>
 
-      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+      <div class="caption-stack">
+        <div id="hud-countdown-banner" class="countdown-banner"></div>
+        <div id="hud-caption-shade" class="shade-caption-banner"></div>
         <div id="hud-lowfuel-banner" class="alert-banner"></div>
         <div id="hud-wind-banner" class="wind-banner" style="display:none;"></div>
-        <div class="lock-hint-pill" id="hud-lock-hint">Nhấp vào màn hình để ẩn chuột xoay 360° · [C] Đổi chế độ chuột</div>
-        <div class="whisper-banner" id="hud-whisper"></div>
-        <div class="prompt-pill" id="hud-prompt"></div>
+        <div class="lock-hint-pill" id="hud-lock-hint">Nhấp màn hình để ẩn chuột xoay 360° · [C] Đổi chuột</div>
       </div>
 
-      <div class="hud-bottom">
-        <div class="hud-panel justify-start" style="font-size:12px;color:#b8c2d9;line-height:1.5;">
-          <div><strong>WASD</strong> Đi · <strong>Space</strong> Nhảy · <strong>Shift</strong> Lướt · <strong>E</strong> Nạp/Châm dầu · <strong>Q</strong> Tỏa Sáng</div>
-          <div><strong>Chuột</strong> Xoay 360° · <strong>Cuộn</strong> Zoom · <strong>[C]</strong> Ẩn/hiện chuột · <strong>Esc/P</strong> Dừng</div>
+      <div style="margin-top:auto;">
+        <div class="bottom-prompts">
+          <div class="whisper-banner" id="hud-whisper"></div>
+          <div class="prompt-pill" id="hud-prompt"></div>
         </div>
+        <div class="hud-bottom">
+        <div class="hud-panel justify-start controls-hint" id="hud-controls-hint"></div>
 
         <div class="hud-panel mote-bar-panel justify-center">
-          <div style="font-size:12px;color:#ffe58a;font-weight:600;">
+          <div class="mote-title">
             Đom đóm <span id="hud-mote-count">0/10</span>
           </div>
           <div class="mote-bar" id="hud-motes"></div>
@@ -115,19 +161,26 @@ export class GameHud {
 
         <div class="abilities-row justify-end">
           <div class="ability-card" id="hud-dash-card">
-            <div class="ability-title">${SVG_DASH} [Shift] Lướt</div>
+            <div class="ability-title" id="hud-dash-title">${SVG_DASH} [Shift] Lướt</div>
             <div class="ability-state" id="hud-dash-state">Sẵn sàng</div>
           </div>
           <div class="ability-card" id="hud-pulse-card">
-            <div class="ability-title">${SVG_PULSE} [Q] Tỏa Sáng (3)</div>
+            <div class="ability-title" id="hud-pulse-title">${SVG_PULSE} [Q] Tỏa Sáng</div>
             <div class="ability-state" id="hud-pulse-state">Sẵn sàng</div>
           </div>
+        </div>
         </div>
       </div>
 
       <div class="offscreen-arrow" id="hud-arrow">
-        <svg width="32" height="32" viewBox="0 0 32 32">
+        <svg width="36" height="36" viewBox="0 0 32 32">
           <polygon points="28,16 6,6 12,16 6,26" fill="#FFB347" stroke="#FFE9B0" stroke-width="1.5" />
+        </svg>
+      </div>
+
+      <div class="offscreen-arrow shade-arrow" id="hud-shade-arrow">
+        <svg width="36" height="36" viewBox="0 0 32 32">
+          <polygon points="28,16 6,6 12,16 6,26" fill="var(--shade-alert)" stroke="#FFFFFF" stroke-width="1.6" />
         </svg>
       </div>
 
@@ -143,7 +196,10 @@ export class GameHud {
               <button class="secondary-btn" data-night="2">Đêm 2 · Đảo Cau</button>
               <button class="secondary-btn" data-night="3">Đêm 3 · Đảo Chuông</button>
             </div>
-            <button class="secondary-btn" id="btn-menu-settings">Cài đặt (Âm thanh, Chuột & Mù màu)</button>
+            <div class="btn-row">
+              <button class="secondary-btn" id="btn-menu-leaderboard">Bảng xếp hạng</button>
+              <button class="secondary-btn" id="btn-menu-settings">Cài đặt & Phím</button>
+            </div>
           </div>
         </div>
       </div>
@@ -164,7 +220,7 @@ export class GameHud {
           <div class="btn-col">
             <button class="primary-btn" id="btn-resume">Tiếp tục</button>
             <button class="secondary-btn" id="btn-pause-restart">Chơi lại Đêm</button>
-            <button class="secondary-btn" id="btn-pause-settings">Cài đặt</button>
+            <button class="secondary-btn" id="btn-pause-settings">Cài đặt & Phím</button>
             <button class="secondary-btn" id="btn-pause-menu">Về menu</button>
           </div>
         </div>
@@ -173,7 +229,7 @@ export class GameHud {
       <!-- Settings Modal -->
       <div class="modal-backdrop hidden" id="settings-modal">
         <div class="modal-card">
-          <h2>Cài đặt</h2>
+          <h2>Cài đặt & Trợ năng</h2>
           <div class="setting-row">
             <label><span>Âm lượng</span><span id="set-vol-val">75%</span></label>
             <input type="range" id="set-vol" min="0" max="100" value="75" />
@@ -190,7 +246,35 @@ export class GameHud {
             <span>Bảng màu dễ phân biệt (Mù màu)</span>
             <input type="checkbox" id="set-colorblind" />
           </label>
+          <label class="setting-check" for="set-reduced-motion">
+            <span>Giảm chuyển động (Tắt rung camera & chớp)</span>
+            <input type="checkbox" id="set-reduced-motion" />
+          </label>
+          <label class="setting-check" for="set-large-text">
+            <span>Chữ lớn giao diện (×1.25)</span>
+            <input type="checkbox" id="set-large-text" />
+          </label>
+
+          <div class="keybind-section">
+            <div class="keybind-header">
+              <span>Đổi phím điều khiển</span>
+              <button class="secondary-btn" type="button" id="btn-reset-keybinds">Khôi phục mặc định</button>
+            </div>
+            <div class="keybind-grid" id="keybind-grid"></div>
+            <div class="conflict-warning" id="keybind-conflict-msg" style="display:none;"></div>
+          </div>
+
           <button class="primary-btn" id="btn-settings-close">Lưu & Đóng</button>
+        </div>
+      </div>
+
+      <!-- Leaderboard Modal -->
+      <div class="modal-backdrop hidden" id="leaderboard-modal">
+        <div class="modal-card">
+          <h2>Bảng xếp hạng Top 10</h2>
+          <p id="lb-subtitle">Tổng điểm các Đêm đã thắng · Lưu cục bộ</p>
+          <div id="lb-table-wrap"></div>
+          <button class="primary-btn" id="btn-lb-close">Đóng</button>
         </div>
       </div>
 
@@ -200,6 +284,25 @@ export class GameHud {
           <h1 id="end-title">Hoàn thành</h1>
           <p id="end-subtitle"></p>
           <div class="breakdown" id="end-breakdown"></div>
+          <div class="score-save-box" id="score-save-section" style="display:none;">
+            <div>
+              <strong>Lưu bảng xếp hạng</strong> — Tổng điểm đã thắng:
+              <span id="save-score-summary" style="color:var(--gold);font-weight:700;"></span>
+            </div>
+            <div class="score-save-row">
+              <input
+                type="text"
+                class="name-input"
+                id="lb-name-input"
+                maxlength="12"
+                placeholder="Tên 3–12 ký tự (vd: May_01)"
+              />
+              <button class="primary-btn" type="button" id="btn-save-score">Lưu điểm</button>
+              <button class="secondary-btn" type="button" id="btn-end-leaderboard">Xem BXH</button>
+            </div>
+            <div class="form-error" id="lb-save-error" style="display:none;"></div>
+            <div class="form-success" id="lb-save-success" style="display:none;"></div>
+          </div>
           <div class="btn-row">
             <button class="primary-btn" id="btn-end-primary">Đêm kế tiếp</button>
             <button class="secondary-btn" id="btn-end-menu">Về menu</button>
@@ -220,22 +323,29 @@ export class GameHud {
     this.elLanterns = this.root.querySelector('#hud-lanterns');
     this.elLanternCount = this.root.querySelector('#hud-lantern-count');
     this.elScore = this.root.querySelector('#hud-score');
+    this.elCountdownBanner = this.root.querySelector('#hud-countdown-banner');
+    this.elShadeCaption = this.root.querySelector('#hud-caption-shade');
     this.elLowFuelBanner = this.root.querySelector('#hud-lowfuel-banner');
     this.elWindBanner = this.root.querySelector('#hud-wind-banner');
     this.elWhisper = this.root.querySelector('#hud-whisper');
     this.elPrompt = this.root.querySelector('#hud-prompt');
+    this.elControlsHint = this.root.querySelector('#hud-controls-hint');
     this.elMotes = this.root.querySelector('#hud-motes');
     this.elMoteCount = this.root.querySelector('#hud-mote-count');
     this.elDashCard = this.root.querySelector('#hud-dash-card');
+    this.elDashTitle = this.root.querySelector('#hud-dash-title');
     this.elDashState = this.root.querySelector('#hud-dash-state');
     this.elPulseCard = this.root.querySelector('#hud-pulse-card');
+    this.elPulseTitle = this.root.querySelector('#hud-pulse-title');
     this.elPulseState = this.root.querySelector('#hud-pulse-state');
     this.elArrow = this.root.querySelector('#hud-arrow');
+    this.elShadeArrow = this.root.querySelector('#hud-shade-arrow');
 
     this.menuModal = this.root.querySelector('#menu-modal');
     this.introModal = this.root.querySelector('#intro-modal');
     this.pauseModal = this.root.querySelector('#pause-modal');
     this.settingsModal = this.root.querySelector('#settings-modal');
+    this.leaderboardModal = this.root.querySelector('#leaderboard-modal');
     this.endModal = this.root.querySelector('#end-modal');
 
     this.volSlider = this.root.querySelector('#set-vol');
@@ -244,6 +354,17 @@ export class GameHud {
     this.sensLabel = this.root.querySelector('#set-sens-val');
     this.lockCheckbox = this.root.querySelector('#set-pointer-lock');
     this.cbCheckbox = this.root.querySelector('#set-colorblind');
+    this.rmCheckbox = this.root.querySelector('#set-reduced-motion');
+    this.ltCheckbox = this.root.querySelector('#set-large-text');
+    this.elKeybindGrid = this.root.querySelector('#keybind-grid');
+    this.elKeybindConflictMsg = this.root.querySelector('#keybind-conflict-msg');
+
+    this.elSaveSection = this.root.querySelector('#score-save-section');
+    this.elSaveSummary = this.root.querySelector('#save-score-summary');
+    this.elNameInput = this.root.querySelector('#lb-name-input');
+    this.elSaveBtn = this.root.querySelector('#btn-save-score');
+    this.elSaveError = this.root.querySelector('#lb-save-error');
+    this.elSaveSuccess = this.root.querySelector('#lb-save-success');
 
     this.syncSettingsUi(this.settings);
 
@@ -257,6 +378,9 @@ export class GameHud {
         this.menuModal.classList.add('hidden');
         this.callbacks.onSelectNight?.(n);
       });
+    });
+    this.root.querySelector('#btn-menu-leaderboard').addEventListener('click', () => {
+      this.callbacks.onOpenLeaderboard?.();
     });
     this.root.querySelector('#btn-menu-settings').addEventListener('click', () => {
       this.settingsOrigin = 'menu';
@@ -285,12 +409,15 @@ export class GameHud {
       this.callbacks.onBackToMenu?.();
     });
 
-    const emitSettings = () => {
+    const emitSettings = (extra = {}) => {
       this.callbacks.onSettingsChange?.({
         volume: Number(this.volSlider.value) / 100,
         mouseSensitivity: Number(this.sensSlider.value),
         pointerLockEnabled: this.lockCheckbox.checked,
-        colorblindMode: this.cbCheckbox.checked
+        colorblindMode: this.cbCheckbox.checked,
+        reducedMotion: this.rmCheckbox.checked,
+        largeText: this.ltCheckbox.checked,
+        keybinds: normalizeKeybinds(extra.keybinds ?? this.settings.keybinds)
       });
     };
 
@@ -302,33 +429,182 @@ export class GameHud {
       this.sensLabel.textContent = `${Number(this.sensSlider.value).toFixed(1)}x`;
       emitSettings();
     });
-    this.lockCheckbox.addEventListener('change', emitSettings);
-    this.cbCheckbox.addEventListener('change', emitSettings);
+    this.lockCheckbox.addEventListener('change', () => emitSettings());
+    this.cbCheckbox.addEventListener('change', () => emitSettings());
+    this.rmCheckbox.addEventListener('change', () => emitSettings());
+    this.ltCheckbox.addEventListener('change', () => emitSettings());
+
+    this.root.querySelector('#btn-reset-keybinds').addEventListener('click', () => {
+      this._cancelListening();
+      emitSettings({ keybinds: { ...DEFAULT_KEYBINDS } });
+    });
 
     this.root.querySelector('#btn-settings-close').addEventListener('click', () => {
+      this._cancelListening();
       this.settingsModal.classList.add('hidden');
       if (this.settingsOrigin === 'pause') this.pauseModal.classList.remove('hidden');
       else this.menuModal.classList.remove('hidden');
+    });
+
+    this.root.querySelector('#btn-lb-close').addEventListener('click', () => {
+      this.leaderboardModal.classList.add('hidden');
+    });
+
+    this.root.querySelector('#btn-end-leaderboard').addEventListener('click', () => {
+      this.callbacks.onOpenLeaderboard?.();
     });
 
     this.root.querySelector('#btn-end-menu').addEventListener('click', () => {
       this.endModal.classList.add('hidden');
       this.callbacks.onBackToMenu?.();
     });
+
+    this.elSaveBtn.addEventListener('click', () => this._handleSaveScoreClick());
+  }
+
+  _cancelListening() {
+    if (this._keyCaptureHandler) {
+      window.removeEventListener('keydown', this._keyCaptureHandler, true);
+      this._keyCaptureHandler = null;
+    }
+    if (this.listeningAction) {
+      this.listeningAction = null;
+      this.callbacks.onRebindStateChange?.(false);
+      this._renderKeybindGrid();
+    }
+  }
+
+  _startListeningKeybind(action) {
+    this._cancelListening();
+    this.listeningAction = action;
+    this.callbacks.onRebindStateChange?.(true);
+    this._renderKeybindGrid();
+
+    this._keyCaptureHandler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const next = { ...normalizeKeybinds(this.settings.keybinds), [action]: e.code };
+      this._cancelListening();
+      this.callbacks.onSettingsChange?.({
+        ...this.settings,
+        keybinds: next
+      });
+    };
+    window.addEventListener('keydown', this._keyCaptureHandler, true);
+  }
+
+  _renderKeybindGrid() {
+    const kb = normalizeKeybinds(this.settings.keybinds);
+    const conflicts = findKeybindConflicts(kb);
+    const conflictActions = new Set(conflicts.flatMap((c) => c.actions));
+
+    let html = '';
+    for (const action of KEYBIND_ACTIONS) {
+      const isListening = this.listeningAction === action;
+      const isConflict = conflictActions.has(action);
+      const cls = `keybind-btn${isListening ? ' listening' : ''}${isConflict ? ' conflict' : ''}`;
+      const label = isListening ? 'Nhấn phím...' : escapeHtml(formatKeyCode(kb[action]));
+      html += `
+        <div class="keybind-row">
+          <span>${escapeHtml(ACTION_LABELS[action])}</span>
+          <button type="button" class="${cls}" data-rebind="${action}">${label}</button>
+        </div>
+      `;
+    }
+    this.elKeybindGrid.innerHTML = html;
+
+    this.elKeybindGrid.querySelectorAll('[data-rebind]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this._startListeningKeybind(btn.dataset.rebind);
+      });
+    });
+
+    if (conflicts.length > 0) {
+      const desc = conflicts
+        .map((c) => `${formatKeyCode(c.code)} (${c.actions.map((a) => ACTION_LABELS[a]).join(', ')})`)
+        .join('; ');
+      this.elKeybindConflictMsg.style.display = 'block';
+      this.elKeybindConflictMsg.textContent = `⚠ Phát hiện trùng phím: ${desc}`;
+    } else {
+      this.elKeybindConflictMsg.style.display = 'none';
+      this.elKeybindConflictMsg.textContent = '';
+    }
   }
 
   syncSettingsUi(settings) {
+    this.settings = settings;
+    const kb = normalizeKeybinds(settings.keybinds);
+
     this.volSlider.value = String(Math.round(settings.volume * 100));
     this.volLabel.textContent = `${this.volSlider.value}%`;
     this.sensSlider.value = String(settings.mouseSensitivity);
     this.sensLabel.textContent = `${settings.mouseSensitivity.toFixed(1)}x`;
     this.lockCheckbox.checked = Boolean(settings.pointerLockEnabled);
     this.cbCheckbox.checked = Boolean(settings.colorblindMode);
+    this.rmCheckbox.checked = Boolean(settings.reducedMotion);
+    this.ltCheckbox.checked = Boolean(settings.largeText);
+
     this.elLockBadge.textContent = `[C] Ẩn chuột: ${settings.pointerLockEnabled ? 'Bật' : 'Tắt (Kéo chuột)'}`;
     document.body.classList.toggle('colorblind', Boolean(settings.colorblindMode));
+    document.body.classList.toggle('reduced-motion', Boolean(settings.reducedMotion));
+    document.body.classList.toggle('large-text', Boolean(settings.largeText));
+
+    const moveLabel = `${formatKeyCode(kb.moveUp)}${formatKeyCode(kb.moveLeft)}${formatKeyCode(kb.moveDown)}${formatKeyCode(kb.moveRight)}`;
+    this.elControlsHint.innerHTML =
+      `<div><strong>${escapeHtml(moveLabel)}</strong> Đi · <strong>${escapeHtml(formatKeyCode(kb.jump))}</strong> Nhảy · <strong>${escapeHtml(formatKeyCode(kb.dash))}</strong> Lướt · <strong>${escapeHtml(formatKeyCode(kb.interact))}</strong> Đèn · <strong>${escapeHtml(formatKeyCode(kb.pulse))}</strong> Sáng</div>` +
+      `<div><strong>Chuột</strong> Xoay 360° · <strong>[C]</strong> Ẩn chuột · <strong>${escapeHtml(formatKeyCode(kb.pause))}</strong> Dừng</div>`;
+    this.elDashTitle.innerHTML = `${SVG_DASH} [${escapeHtml(formatKeyCode(kb.dash))}] Lướt`;
+    this.elPulseTitle.innerHTML = `${SVG_PULSE} [${escapeHtml(formatKeyCode(kb.pulse))}] Tỏa Sáng`;
+
+    this._renderKeybindGrid();
+  }
+
+  showLeaderboardModal(entries) {
+    const wrap = this.root.querySelector('#lb-table-wrap');
+    if (!entries || entries.length === 0) {
+      wrap.innerHTML = '<p>Chưa có kỷ lục nào. Hãy chơi và lưu điểm đầu tiên!</p>';
+    } else {
+      const rows = entries
+        .map(
+          (e, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td><strong>${escapeHtml(e.name)}</strong></td>
+            <td style="color:var(--gold);font-weight:700;">${e.score}</td>
+            <td>${e.nights_won}/3</td>
+            <td>${e.seed}</td>
+          </tr>
+        `
+        )
+        .join('');
+      wrap.innerHTML = `
+        <table class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Người chơi</th>
+              <th>Điểm</th>
+              <th>Đêm</th>
+              <th>Seed</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+    this.leaderboardModal.classList.remove('hidden');
+  }
+
+  showShadeSpawnAlert(shadeId, pos) {
+    this.shadeAlert = {
+      id: shadeId,
+      pos: [pos[0], pos[1], pos[2]],
+      timer: 4.5
+    };
   }
 
   flashHit() {
+    if (this.settings.reducedMotion) return;
     const color = this.settings.colorblindMode ? 'rgba(255,255,255,0.5)' : 'rgba(255,90,95,0.55)';
     this.elFlash.style.background = `radial-gradient(circle, rgba(0,0,0,0) 45%, ${color} 100%)`;
     this.elFlash.style.opacity = '1';
@@ -336,6 +612,7 @@ export class GameHud {
   }
 
   flashPulse() {
+    if (this.settings.reducedMotion) return;
     this.elFlash.style.background =
       'radial-gradient(circle, rgba(255,233,176,0.28) 20%, rgba(255,179,71,0) 75%)';
     this.elFlash.style.opacity = '1';
@@ -343,15 +620,18 @@ export class GameHud {
   }
 
   showMenu() {
+    this._cancelListening();
     this.introModal.classList.add('hidden');
     this.pauseModal.classList.add('hidden');
     this.endModal.classList.add('hidden');
     this.settingsModal.classList.add('hidden');
+    this.leaderboardModal.classList.add('hidden');
     this.menuModal.classList.remove('hidden');
   }
 
   showIntro(night) {
     const info = NIGHT_INTROS[night];
+    this.shadeAlert = null;
     this.root.querySelector('#intro-title').textContent = info.title;
     this.root.querySelector('#intro-quote').textContent = info.quote;
     this.elWhisper.classList.remove('visible');
@@ -364,6 +644,7 @@ export class GameHud {
     if (paused) {
       this.pauseModal.classList.remove('hidden');
     } else {
+      this._cancelListening();
       this.pauseModal.classList.add('hidden');
       this.settingsModal.classList.add('hidden');
     }
@@ -375,7 +656,33 @@ export class GameHud {
     this.whisperTimer = 4.2;
   }
 
-  showEndModal(sim, reason, { totalCampaignScore, isCampaignWin }) {
+  async _handleSaveScoreClick() {
+    const raw = this.elNameInput.value;
+    const check = validateLeaderboardName(raw);
+    if (!check.valid) {
+      this.elSaveError.textContent = check.error;
+      this.elSaveError.style.display = 'block';
+      this.elSaveSuccess.style.display = 'none';
+      return;
+    }
+    this.elSaveError.style.display = 'none';
+    this.elSaveBtn.disabled = true;
+    try {
+      const res = await this.callbacks.onSaveLeaderboardScore?.({ name: check.name });
+      this.elNameInput.disabled = true;
+      this.elSaveSuccess.style.display = 'block';
+      this.elSaveSuccess.textContent =
+        res && res.rank > 0
+          ? `Đã lưu kỷ lục "${check.name}" — Hạng #${res.rank} Top 10!`
+          : `Đã lưu điểm "${check.name}".`;
+    } catch (err) {
+      this.elSaveBtn.disabled = false;
+      this.elSaveError.style.display = 'block';
+      this.elSaveError.textContent = err.message || 'Không thể lưu điểm.';
+    }
+  }
+
+  showEndModal(sim, reason, { totalCampaignScore, nightsWonCount, isCampaignWin }) {
     const won = sim.state === 'won';
     const titleEl = this.root.querySelector('#end-title');
     const subEl = this.root.querySelector('#end-subtitle');
@@ -406,8 +713,22 @@ export class GameHud {
       <div class="breakdown-row"><span>Đèn sáng lúc Bình minh</span><span>+${b.lanternDawnBonus}</span></div>
       <div class="breakdown-row"><span>Ngọn lửa còn lại</span><span>+${b.flameBonus}</span></div>
       <div class="breakdown-row total"><span>Điểm Đêm ${sim.night}</span><span>${sim.score}</span></div>
-      <div class="breakdown-row total"><span>Tổng điểm hành trình</span><span>${totalCampaignScore}</span></div>
+      <div class="breakdown-row total"><span>Tổng điểm đã thắng</span><span>${totalCampaignScore}</span></div>
     `;
+
+    // Show leaderboard submission after Dawn finale (Night 3 win) OR after losing any Night
+    const allowSave = !won || (won && sim.night === 3);
+    if (allowSave) {
+      this.elSaveSection.style.display = 'block';
+      this.elSaveSummary.textContent = `${totalCampaignScore} điểm (${nightsWonCount} đêm thắng)`;
+      this.elNameInput.disabled = false;
+      this.elNameInput.value = '';
+      this.elSaveBtn.disabled = false;
+      this.elSaveError.style.display = 'none';
+      this.elSaveSuccess.style.display = 'none';
+    } else {
+      this.elSaveSection.style.display = 'none';
+    }
 
     const freshBtn = primaryBtn.cloneNode(true);
     primaryBtn.parentNode.replaceChild(freshBtn, primaryBtn);
@@ -452,7 +773,6 @@ export class GameHud {
 
     this.elNightLabel.textContent = `Đêm ${sim.night} · ${sim.map.name}`;
 
-    // Flames with SVG icons
     let flamesHtml = '';
     for (let i = 0; i < sim.tuning.flames; i += 1) {
       flamesHtml += `<span class="flame-icon ${i < sim.player.flames ? '' : 'lost'}">${SVG_FLAME}</span>`;
@@ -466,15 +786,44 @@ export class GameHud {
       this.elCharmTag.style.display = 'none';
     }
 
-    // Timer mm:ss (warning prefix in colorblind mode or <= 30s)
     const totalSec = Math.ceil(sim.timeLeftS);
     const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
     const sec = String(totalSec % 60).padStart(2, '0');
-    const isDangerTime = totalSec <= 30 && sim.state === 'playing';
+    const isDangerTime = totalSec <= 30 && isPlaying;
     this.elTimer.textContent = isDangerTime && this.settings.colorblindMode ? `⚠ ${min}:${sec}` : `${min}:${sec}`;
     this.elTimer.classList.toggle('danger', isDangerTime);
 
-    // Lanterns + interact target + low-fuel warnings
+    if (isPlaying && totalSec <= 10 && totalSec >= 1) {
+      this.elCountdownBanner.style.display = 'inline-block';
+      this.elCountdownBanner.textContent = `⏳ 10s cuối: Còn ${totalSec}s tới Bình Minh!`;
+    } else {
+      this.elCountdownBanner.style.display = 'none';
+    }
+
+    // Visual caption + offscreen arrow for newly spawned Shade
+    if (this.shadeAlert && isPlaying) {
+      this.shadeAlert.timer -= dt;
+      if (this.shadeAlert.timer <= 0) {
+        this.shadeAlert = null;
+        this.elShadeCaption.style.display = 'none';
+        this.elShadeArrow.style.display = 'none';
+      } else {
+        const liveShade = sim.shades.find((s) => s.id === this.shadeAlert.id);
+        const shadePos = liveShade ? liveShade.pos : this.shadeAlert.pos;
+        this.elShadeCaption.style.display = 'inline-block';
+        this.elShadeCaption.textContent = `⚠ Bóng Mực ${this.shadeAlert.id} vừa xuất hiện!`;
+        const projShade = renderer.projectToScreen(shadePos, 1.2);
+        if (!projShade.onScreen) {
+          positionEdgeArrow(this.elShadeArrow, projShade);
+        } else {
+          this.elShadeArrow.style.display = 'none';
+        }
+      }
+    } else {
+      this.elShadeCaption.style.display = 'none';
+      this.elShadeArrow.style.display = 'none';
+    }
+
     let litCount = 0;
     let lanternsHtml = '';
     let nearTarget = null;
@@ -510,19 +859,18 @@ export class GameHud {
     }
 
     const reqLit = Math.ceil(sim.tuning.win_ratio * sim.lanterns.length - 1e-9);
-    this.elLanternGoal.textContent = `Đèn (cần ≥${reqLit})`;
+    this.elLanternGoal.textContent = `Đèn (≥${reqLit})`;
     this.elLanterns.innerHTML = lanternsHtml;
     this.elLanternCount.textContent = `${litCount}/${sim.lanterns.length}`;
     this.elScore.textContent = String(sim.score);
 
-    if (lowFuelIds.length > 0 && sim.state === 'playing') {
+    if (lowFuelIds.length > 0 && isPlaying) {
       this.elLowFuelBanner.style.display = 'inline-block';
-      this.elLowFuelBanner.textContent = `⚠ Sắp cạn dầu: ${lowFuelIds.join(', ')}`;
+      this.elLowFuelBanner.textContent = `⚠ Sắp cạn dầu (<30): ${lowFuelIds.join(', ')}`;
     } else {
       this.elLowFuelBanner.style.display = 'none';
     }
 
-    // Dynamic capacity mote bar (10..20 slots)
     const carryCap = sim.getCarryCapacity();
     let motesHtml = '';
     for (let i = 0; i < carryCap; i += 1) {
@@ -531,7 +879,6 @@ export class GameHud {
     this.elMotes.innerHTML = motesHtml;
     this.elMoteCount.textContent = `${sim.player.carried}/${carryCap}`;
 
-    // Dash & Pulse cooldown cards
     if (sim.player.charmTicks > 0) {
       this.elDashCard.classList.remove('cooling');
       this.elDashState.textContent = '0s (Bùa Gió)';
@@ -554,46 +901,36 @@ export class GameHud {
       this.elPulseState.textContent = 'Sẵn sàng';
     }
 
-    if (nearTarget && sim.state === 'playing') {
+    const interactKey = formatKeyCode(normalizeKeybinds(this.settings.keybinds).interact);
+    if (nearTarget && isPlaying) {
       if (!nearTarget.lit) {
         const cost = sim.getLanternCost(nearTarget);
         const tag = nearTarget.everLit ? ' (Thắp lại)' : '';
-        this.elPrompt.textContent = `E — Nạp ánh sáng (${nearTarget.deposited}/${cost})${tag}`;
+        this.elPrompt.textContent = `${interactKey} — Nạp ánh sáng (${nearTarget.deposited}/${cost})${tag}`;
       } else {
         const fuelInt = Math.round(nearTarget.fuel60 / FUEL_SCALE);
         const warn = nearTarget.fuel60 < LOW_FUEL_60 ? ' ⚠' : '';
-        this.elPrompt.textContent = `E — Châm dầu ${nearTarget.id} (${fuelInt}/100)${warn}`;
+        this.elPrompt.textContent = `${interactKey} — Châm dầu ${nearTarget.id} (${fuelInt}/100)${warn}`;
       }
       this.elPrompt.classList.add('visible');
     } else {
       this.elPrompt.classList.remove('visible');
     }
 
-    if (sim.windEnabled && sim.wind.warning) {
+    if (isPlaying && sim.windEnabled && sim.wind.warning) {
       this.elWindBanner.style.display = 'inline-block';
       this.elWindBanner.textContent = '⚠ Gió mạnh sắp thổi — bám chắc mặt đất!';
-    } else if (sim.windEnabled && sim.wind.active) {
+    } else if (isPlaying && sim.windEnabled && sim.wind.active) {
       this.elWindBanner.style.display = 'inline-block';
       this.elWindBanner.textContent = `Gió mạnh đang thổi (${Math.round(sim.wind.dirDeg)}°)`;
     } else {
       this.elWindBanner.style.display = 'none';
     }
 
-    if (closestPriorityLantern && sim.state === 'playing') {
-      const proj = renderer.projectToScreen(closestPriorityLantern.pos);
+    if (closestPriorityLantern && isPlaying) {
+      const proj = renderer.projectToScreen(closestPriorityLantern.pos, 2.4);
       if (!proj.onScreen) {
-        const margin = 48;
-        const cx = proj.w / 2;
-        const cy = proj.h / 2;
-        const dx = Math.cos(proj.angleRad);
-        const dy = Math.sin(proj.angleRad);
-        const rx = Math.abs(dx) > 1e-4 ? (cx - margin) / Math.abs(dx) : 9999;
-        const ry = Math.abs(dy) > 1e-4 ? (cy - margin) / Math.abs(dy) : 9999;
-        const t = Math.min(rx, ry);
-        this.elArrow.style.display = 'flex';
-        this.elArrow.style.left = `${cx + dx * t - 17}px`;
-        this.elArrow.style.top = `${cy + dy * t - 17}px`;
-        this.elArrow.style.transform = `rotate(${(proj.angleRad * 180) / Math.PI}deg)`;
+        positionEdgeArrow(this.elArrow, proj);
       } else {
         this.elArrow.style.display = 'none';
       }

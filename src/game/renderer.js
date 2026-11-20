@@ -17,12 +17,14 @@ import {
 } from './textures.js';
 
 /**
- * Realistic Three.js renderer supporting all 3 standardized islands, procedural PBR textures,
- * moon & volumetric glow sprites, instanced swaying grass, animated Mây, and smooth damped camera.
+ * Three.js WebGL renderer supporting all 3 standardized islands, procedural PBR textures,
+ * instanced motes/shades, reduced-motion accessibility, and deterministic benchmark mode.
  */
 export class IslandRenderer {
-  constructor(container) {
+  constructor(container, { benchMode = false, reducedMotion = false } = {}) {
     this.container = container;
+    this.benchMode = Boolean(benchMode);
+    this.reducedMotion = Boolean(reducedMotion);
     this.elapsed = 0;
 
     this.scene = new THREE.Scene();
@@ -37,8 +39,8 @@ export class IslandRenderer {
     );
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setSize(container.clientWidth, container.clientHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setSize(container.clientWidth, Math.max(1, container.clientHeight));
+    this.renderer.setPixelRatio(this.benchMode ? 1 : Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -74,8 +76,6 @@ export class IslandRenderer {
     this.starPoints = null;
     this.windLeaves = [];
     this.lanternViews = new Map();
-    this.moteMeshes = new Map();
-    this.shadeViews = new Map();
     this.drifterViews = new Map();
     this.charmViews = new Map();
     this.pulseWaves = [];
@@ -87,17 +87,37 @@ export class IslandRenderer {
     this.bellMesh = null;
     this.colorblindMode = false;
 
+    this._maxMotes = 256;
+    this._maxShades = 256;
+    this.moteOrbInst = null;
+    this.moteHaloInst = null;
+    this.shadeBodyInst = null;
+    this.shadeBodyMat = null;
+    this.shadeEyeInst = null;
+    this.shadeEyeMat = null;
+    this.shadeStunInst = null;
+
     this._camPos = new THREE.Vector3(0, 8, -12);
     this._camTarget = new THREE.Vector3(0, 1.4, 0);
+    this._desiredPos = new THREE.Vector3();
+    this._desiredTarget = new THREE.Vector3();
+    this._overrideLookAt = new THREE.Vector3();
+    this._projVec = new THREE.Vector3();
     this._camInitialized = false;
     this._shakeTrauma = 0;
     this._walkPhase = 0;
     this._wasGrounded = true;
     this._dashFxAccum = 0;
     this._dummy = new THREE.Object3D();
+    this._eyeDummy = new THREE.Object3D();
+    this._stunDummy = new THREE.Object3D();
+    this._colShadeNormal = new THREE.Color(PALETTE.shadeBody);
+    this._colShadeStunned = new THREE.Color(PALETTE.shadeStunned);
+    this._colShadeDrain = new THREE.Color('#4c286e');
 
     this._buildSkyAndClouds();
     this._buildPlayer();
+    this._initEntityPools();
     this._buildGuidingWisps();
     this._buildWindLeaves();
     this.rebuildMap(1);
@@ -115,7 +135,6 @@ export class IslandRenderer {
   }
 
   _buildSkyAndClouds() {
-    // Deep misty cloud sea floor below islands
     const seaFloor = new THREE.Mesh(
       new THREE.CircleGeometry(240, 48),
       new THREE.MeshBasicMaterial({ color: PALETTE.cloudSea, transparent: true, opacity: 0.72 })
@@ -124,7 +143,6 @@ export class IslandRenderer {
     seaFloor.position.y = -11.2;
     this.scene.add(seaFloor);
 
-    // Volumetric moon aligned with directional moonlight
     const moon = new THREE.Mesh(
       new THREE.SphereGeometry(5.5, 24, 24),
       new THREE.MeshBasicMaterial({ color: PALETTE.lanternCore })
@@ -191,7 +209,6 @@ export class IslandRenderer {
     this.playerBody.castShadow = true;
     this.playerVisual.add(this.playerBody);
 
-    // Red scarf + flowing scarf tail (#C8102E)
     const scarfMat = new THREE.MeshStandardMaterial({ color: PALETTE.mayScarf, roughness: 0.65 });
     const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.08, 8, 14), scarfMat);
     scarf.rotation.x = Math.PI / 2;
@@ -211,7 +228,6 @@ export class IslandRenderer {
     head.castShadow = true;
     this.playerVisual.add(head);
 
-    // Conical Nón Lá with textured bamboo weave
     const sandTex = getSandTextures();
     const hat = new THREE.Mesh(
       new THREE.ConeGeometry(0.76, 0.4, 20),
@@ -227,7 +243,6 @@ export class IslandRenderer {
     hat.castShadow = true;
     this.playerVisual.add(hat);
 
-    // Hanging pendulum miniature lantern on front brim (+Z)
     this.hatLanternPivot = new THREE.Group();
     this.hatLanternPivot.position.set(0, 1.44, 0.62);
     this.playerVisual.add(this.hatLanternPivot);
@@ -269,7 +284,101 @@ export class IslandRenderer {
     this.scene.add(this.playerGroup);
   }
 
+  _initEntityPools() {
+    this._allocateMotePool(this._maxMotes);
+    this._allocateShadePool(this._maxShades);
+  }
+
+  _allocateMotePool(cap) {
+    if (this.moteOrbInst) {
+      this.scene.remove(this.moteOrbInst);
+      this.moteOrbInst.geometry.dispose();
+      this.moteOrbInst.material.dispose();
+    }
+    if (this.moteHaloInst) {
+      this.scene.remove(this.moteHaloInst);
+      this.moteHaloInst.geometry.dispose();
+      this.moteHaloInst.material.dispose();
+    }
+    this._maxMotes = cap;
+
+    const haloTex = getGlowTexture(PALETTE.moteCore, PALETTE.moteHalo);
+    this.moteOrbInst = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.19, 8, 8),
+      new THREE.MeshBasicMaterial({ color: PALETTE.moteCore }),
+      cap
+    );
+    this.moteOrbInst.frustumCulled = false;
+    this.moteOrbInst.count = 0;
+
+    this.moteHaloInst = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1.25, 1.25),
+      new THREE.MeshBasicMaterial({
+        map: haloTex,
+        transparent: true,
+        opacity: 0.78,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      }),
+      cap
+    );
+    this.moteHaloInst.frustumCulled = false;
+    this.moteHaloInst.count = 0;
+
+    this.scene.add(this.moteOrbInst, this.moteHaloInst);
+  }
+
+  _allocateShadePool(cap) {
+    if (this.shadeBodyInst) {
+      this.scene.remove(this.shadeBodyInst, this.shadeEyeInst, this.shadeStunInst);
+      this.shadeBodyInst.geometry.dispose();
+      this.shadeBodyMat.dispose();
+      this.shadeEyeInst.geometry.dispose();
+      this.shadeEyeMat.dispose();
+      this.shadeStunInst.geometry.dispose();
+      this.shadeStunInst.material.dispose();
+    }
+    this._maxShades = cap;
+
+    const rimHex = this.colorblindMode ? COLORBLIND_PALETTE.shadeRim : PALETTE.shadeRim;
+    const bodyGeo = new THREE.ConeGeometry(0.65, 1.7, 10);
+    bodyGeo.translate(0, 0.85, 0);
+    this.shadeBodyMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      emissive: rimHex,
+      emissiveIntensity: 0.75,
+      roughness: 0.55
+    });
+    this.shadeBodyInst = new THREE.InstancedMesh(bodyGeo, this.shadeBodyMat, cap);
+    this.shadeBodyInst.castShadow = true;
+    this.shadeBodyInst.frustumCulled = false;
+    for (let i = 0; i < cap; i += 1) {
+      this.shadeBodyInst.setColorAt(i, this._colShadeNormal);
+    }
+    if (this.shadeBodyInst.instanceColor) {
+      this.shadeBodyInst.instanceColor.needsUpdate = true;
+    }
+    this.shadeBodyInst.count = 0;
+
+    this.shadeEyeMat = new THREE.MeshBasicMaterial({ color: rimHex });
+    this.shadeEyeInst = new THREE.InstancedMesh(new THREE.SphereGeometry(0.08, 6, 6), this.shadeEyeMat, cap * 2);
+    this.shadeEyeInst.frustumCulled = false;
+    this.shadeEyeInst.count = 0;
+
+    this.shadeStunInst = new THREE.InstancedMesh(
+      new THREE.TorusGeometry(0.55, 0.05, 6, 12),
+      new THREE.MeshBasicMaterial({ color: PALETTE.goldAccent }),
+      cap
+    );
+    this.shadeStunInst.frustumCulled = false;
+    this.shadeStunInst.count = 0;
+
+    this.scene.add(this.shadeBodyInst, this.shadeEyeInst, this.shadeStunInst);
+  }
+
   _buildGuidingWisps() {
+    if (this.benchMode) return;
     const sparkTex = getGlowTexture(PALETTE.moteCore, PALETTE.goldAccent);
     for (let i = 0; i < 8; i += 1) {
       const mat = new THREE.SpriteMaterial({
@@ -287,6 +396,7 @@ export class IslandRenderer {
   }
 
   _buildWindLeaves() {
+    if (this.benchMode) return;
     const leafGeo = new THREE.PlaneGeometry(0.34, 0.16);
     for (let i = 0; i < 36; i += 1) {
       const mat = new THREE.MeshBasicMaterial({
@@ -310,12 +420,13 @@ export class IslandRenderer {
     this.grassTufts = null;
     this.grassMeta = [];
     this.bellMesh = null;
-    this.colorblindMode = false;
 
-    for (const view of this.moteMeshes.values()) this.scene.remove(view.group);
-    this.moteMeshes.clear();
-    for (const view of this.shadeViews.values()) this.scene.remove(view.group);
-    this.shadeViews.clear();
+    if (this.moteOrbInst) this.moteOrbInst.count = 0;
+    if (this.moteHaloInst) this.moteHaloInst.count = 0;
+    if (this.shadeBodyInst) this.shadeBodyInst.count = 0;
+    if (this.shadeEyeInst) this.shadeEyeInst.count = 0;
+    if (this.shadeStunInst) this.shadeStunInst.count = 0;
+
     for (const view of this.drifterViews.values()) this.scene.remove(view.group);
     this.drifterViews.clear();
     for (const view of this.charmViews.values()) this.scene.remove(view.group);
@@ -363,6 +474,7 @@ export class IslandRenderer {
   }
 
   _buildInstancedGrass(map) {
+    if (this.benchMode) return;
     const spots = [];
     const maxR = map.night === 3 ? 42 : map.night === 2 ? 25 : 37;
     const centers = map.night === 2 ? [[0, 0], [70, 0]] : [[0, 0]];
@@ -462,13 +574,11 @@ export class IslandRenderer {
     if (night === 1) {
       this._addIslandDisc(0, 0, 40, 0, 2.6);
 
-      // Central shrine dais + radial stone markers
       const dais = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.3, 0.24, 16), stoneMat);
       dais.position.y = 0.12;
       dais.receiveShadow = true;
       this.worldGroup.add(dais);
 
-      // Wooden dock (Đảo Bến) at +Z with posts
       for (let i = 0; i < 6; i += 1) {
         const plank = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.18, 1.0), woodMat);
         plank.position.set(0, 0.09, 36.5 + i * 1.15);
@@ -488,7 +598,6 @@ export class IslandRenderer {
       this._addIslandDisc(0, 0, 28, 0, 2.6);
       this._addIslandDisc(70, 0, 28, 0, 2.6);
 
-      // Bamboo bridge x in [26, 44], z in [-2, 2] + side guard poles
       const bridge = new THREE.Mesh(new THREE.BoxGeometry(18, 0.28, 4.0), woodMat);
       bridge.position.set(35, -0.1, 0);
       bridge.receiveShadow = true;
@@ -507,7 +616,6 @@ export class IslandRenderer {
         }
       }
 
-      // Multi-tiered Betel palms (Cây cau) around islands
       const leafMat = new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 0.82 });
       for (const cx of [0, 70]) {
         for (let i = 0; i < 7; i += 1) {
@@ -530,7 +638,6 @@ export class IslandRenderer {
     } else if (night === 3) {
       this._addIslandDisc(0, 0, 45, 0, 2.6);
 
-      // Tier 1 (Y=3, r=12..24, z > 0) with stone side walls + textured grass top
       const shape = new THREE.Shape();
       shape.absarc(0, 0, 24, 0, Math.PI, false);
       shape.absarc(0, 0, 12, Math.PI, 0, true);
@@ -548,10 +655,8 @@ export class IslandRenderer {
       tier1Mesh.castShadow = true;
       this.worldGroup.add(tier1Mesh);
 
-      // Tier 2 (Y=6, r=8)
       this._addIslandDisc(0, 0, 8, 6, 6.0);
 
-      // 2 Straight Ramps at 30 deg & 150 deg (width 3m, r=30 Y=0 to r=24 Y=3)
       for (const deg of [30, 150]) {
         const rad = (deg * Math.PI) / 180;
         const len = Math.hypot(6, 3);
@@ -565,7 +670,6 @@ export class IslandRenderer {
         rampMesh.castShadow = true;
         this.worldGroup.add(rampMesh);
 
-        // Framing posts outside the 3m ramp width
         const nx = -Math.sin(rad);
         const nz = Math.cos(rad);
         for (const side of [-1.72, 1.72]) {
@@ -579,7 +683,6 @@ export class IslandRenderer {
         }
       }
 
-      // Bell Tower at (0, 6, 0), r=2, height=8 + swinging bronze bell
       const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.0, 8.0, 20), stoneMat);
       tower.position.set(0, 10.0, 0);
       tower.castShadow = true;
@@ -610,7 +713,6 @@ export class IslandRenderer {
       this._addJumpPadMesh(pad);
     }
 
-    // Build lanterns with radial glow sprites
     const roofMat = new THREE.MeshStandardMaterial({ color: '#2b2438', roughness: 0.72 });
     const lanternGlowTex = getGlowTexture(PALETTE.lanternCore, PALETTE.lanternLit);
     for (const l of map.lanterns) {
@@ -641,7 +743,6 @@ export class IslandRenderer {
       body.castShadow = true;
       bodyGroup.add(body);
 
-      // Tear marks for colorblind-friendly unlit distinction
       const tearMat = new THREE.MeshBasicMaterial({ color: '#1b1d28' });
       const tears = [];
       for (let t = 0; t < 3; t += 1) {
@@ -660,7 +761,6 @@ export class IslandRenderer {
       roof.castShadow = true;
       group.add(roof);
 
-      // Overhead fuel gauge bar
       const fuelBarGroup = new THREE.Group();
       fuelBarGroup.position.y = 4.45;
       fuelBarGroup.visible = false;
@@ -744,13 +844,30 @@ export class IslandRenderer {
   setColorblindMode(enabled) {
     this.colorblindMode = Boolean(enabled);
     const rimHex = this.colorblindMode ? COLORBLIND_PALETTE.shadeRim : PALETTE.shadeRim;
-    for (const view of this.shadeViews.values()) {
-      view.bodyMat.emissive.set(rimHex);
-      view.eyeMat.color.set(rimHex);
+    if (this.shadeBodyMat) this.shadeBodyMat.emissive.set(rimHex);
+    if (this.shadeEyeMat) this.shadeEyeMat.color.set(rimHex);
+  }
+
+  setReducedMotion(enabled) {
+    this.reducedMotion = Boolean(enabled);
+    if (this.reducedMotion) {
+      this._shakeTrauma = 0;
+    }
+  }
+
+  getRendererDescription() {
+    try {
+      const gl = this.renderer.getContext();
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      return `Three.js 0.170.0 / WebGL2 (${String(gpu || 'WebGL')})`;
+    } catch {
+      return 'Three.js 0.170.0 / WebGL2';
     }
   }
 
   triggerShake(amount = 0.4) {
+    if (this.reducedMotion) return;
     this._shakeTrauma = Math.min(1, this._shakeTrauma + amount);
   }
 
@@ -769,6 +886,7 @@ export class IslandRenderer {
   }
 
   spawnSkyLantern(pos) {
+    if (this.benchMode) return;
     for (let i = 0; i < 3; i += 1) {
       const mat = new THREE.MeshBasicMaterial({
         color: PALETTE.lanternLit,
@@ -783,6 +901,7 @@ export class IslandRenderer {
   }
 
   _spawnBurstParticles(pos, colorHex, count = 6, speed = 2.2) {
+    if (this.benchMode) return;
     const geo = new THREE.SphereGeometry(0.08, 6, 6);
     for (let i = 0; i < count; i += 1) {
       const ang = (i / count) * Math.PI * 2 + this.elapsed;
@@ -803,128 +922,128 @@ export class IslandRenderer {
   }
 
   _syncMotes(motes) {
-    const activeIds = new Set(motes.map((m) => m.id));
-    for (const [id, view] of this.moteMeshes.entries()) {
-      if (!activeIds.has(id)) {
-        this.scene.remove(view.group);
-        this.moteMeshes.delete(id);
-      }
+    if (motes.length > this._maxMotes) {
+      this._allocateMotePool(Math.max(motes.length + 64, this._maxMotes * 2));
     }
 
-    const haloTex = getGlowTexture(PALETTE.moteCore, PALETTE.moteHalo);
+    let count = 0;
+    const blinkPhase = Math.floor(this.elapsed * 10) % 2 === 0;
     for (let i = 0; i < motes.length; i += 1) {
       const m = motes[i];
-      let view = this.moteMeshes.get(m.id);
-      if (!view) {
-        const group = new THREE.Group();
-        const orb = new THREE.Mesh(
-          new THREE.SphereGeometry(0.19, 10, 10),
-          new THREE.MeshBasicMaterial({ color: PALETTE.moteCore })
-        );
-        const halo = new THREE.Sprite(
-          new THREE.SpriteMaterial({
-            map: haloTex,
-            transparent: true,
-            opacity: 0.78,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false
-          })
-        );
-        halo.scale.set(1.25, 1.25, 1);
-        group.add(orb, halo);
-        this.scene.add(group);
-        view = { group, orb, halo, phase: i * 0.85 };
-        this.moteMeshes.set(m.id, view);
+      if (m.kind === 'dropped' && m.ttlTicks !== null && m.ttlTicks < 150 && !blinkPhase) {
+        continue;
       }
-      const hoverY = 0.72 + Math.sin(this.elapsed * 3.6 + view.phase) * 0.16;
-      view.group.position.set(m.pos[0], m.pos[1], m.pos[2]);
-      view.orb.position.y = hoverY;
-      view.halo.position.y = hoverY;
-      if (m.kind === 'dropped' && m.ttlTicks !== null && m.ttlTicks < 150) {
-        view.group.visible = Math.floor(this.elapsed * 10) % 2 === 0;
-      } else {
-        view.group.visible = true;
-      }
+      const hoverY = 0.72 + Math.sin(this.elapsed * 3.6 + i * 0.85) * 0.16;
+      this._dummy.position.set(m.pos[0], m.pos[1] + hoverY, m.pos[2]);
+      this._dummy.rotation.set(0, 0, 0);
+      this._dummy.scale.setScalar(1);
+      this._dummy.updateMatrix();
+      this.moteOrbInst.setMatrixAt(count, this._dummy.matrix);
+
+      this._dummy.quaternion.copy(this.camera.quaternion);
+      this._dummy.updateMatrix();
+      this.moteHaloInst.setMatrixAt(count, this._dummy.matrix);
+      count += 1;
     }
+
+    this.moteOrbInst.count = count;
+    this.moteOrbInst.instanceMatrix.needsUpdate = true;
+    this.moteHaloInst.count = count;
+    this.moteHaloInst.instanceMatrix.needsUpdate = true;
   }
 
   _syncShades(shades) {
-    const activeIds = new Set(shades.map((s) => s.id));
-    for (const [id, view] of this.shadeViews.entries()) {
-      if (!activeIds.has(id)) {
-        this.scene.remove(view.group);
-        this.shadeViews.delete(id);
-      }
+    if (shades.length > this._maxShades) {
+      this._allocateShadePool(Math.max(shades.length + 64, this._maxShades * 2));
     }
+
+    const px = this.playerGroup.position.x;
+    const pz = this.playerGroup.position.z;
+    let bodyCount = 0;
+    let eyeCount = 0;
+    let stunCount = 0;
 
     for (let i = 0; i < shades.length; i += 1) {
       const s = shades[i];
-      let view = this.shadeViews.get(s.id);
-      if (!view) {
-        const rimHex = this.colorblindMode ? COLORBLIND_PALETTE.shadeRim : PALETTE.shadeRim;
-        const group = new THREE.Group();
-        const bodyMat = new THREE.MeshStandardMaterial({
-          color: PALETTE.shadeBody,
-          emissive: rimHex,
-          emissiveIntensity: 0.75,
-          roughness: 0.55
-        });
-        const body = new THREE.Mesh(new THREE.ConeGeometry(0.65, 1.7, 12), bodyMat);
-        body.position.y = 0.85;
-        body.castShadow = true;
-        group.add(body);
+      const hover = Math.sin(this.elapsed * 4 + i * 1.3) * 0.1;
+      const gx = s.pos[0];
+      const gy = Math.max(0, s.pos[1] - 0.8) + hover;
+      const gz = s.pos[2];
 
-        const eyeMat = new THREE.MeshBasicMaterial({ color: rimHex });
-        const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
-        leftEye.position.set(-0.15, 1.15, 0.34);
-        const rightEye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
-        rightEye.position.set(0.15, 1.15, 0.34);
-        group.add(leftEye, rightEye);
-
-        const stunRing = new THREE.Mesh(
-          new THREE.TorusGeometry(0.55, 0.05, 6, 16),
-          new THREE.MeshBasicMaterial({ color: PALETTE.goldAccent })
-        );
-        stunRing.rotation.x = Math.PI / 2;
-        stunRing.position.y = 1.9;
-        stunRing.visible = false;
-        group.add(stunRing);
-
-        this.scene.add(group);
-        view = { group, body, bodyMat, eyeMat, stunRing, phase: i * 1.3 };
-        this.shadeViews.set(s.id, view);
-      }
-
-      const hover = Math.sin(this.elapsed * 4 + view.phase) * 0.1;
-      view.group.position.set(s.pos[0], Math.max(0, s.pos[1] - 0.8) + hover, s.pos[2]);
+      let sx = 1;
+      let sy = 1;
+      let sz = 1;
+      let rotY = Math.atan2(px - gx, pz - gz);
+      let tint = this._colShadeNormal;
 
       if (s.state === 'spawning') {
-        const scale = Math.max(0.15, 1 - s.stateTicksLeft / 30);
-        view.group.scale.setScalar(scale);
-        view.stunRing.visible = false;
+        const sc = Math.max(0.15, 1 - s.stateTicksLeft / 30);
+        sx = sc;
+        sy = sc;
+        sz = sc;
       } else if (s.state === 'stunned') {
-        view.group.scale.set(0.9, 0.75, 0.9);
-        view.bodyMat.color.set(PALETTE.shadeStunned);
-        view.bodyMat.emissiveIntensity = 0.45;
-        view.stunRing.visible = true;
-        view.stunRing.rotation.z = this.elapsed * 5;
-        view.group.rotation.y += 0.12;
+        sx = 0.9;
+        sy = 0.75;
+        sz = 0.9;
+        rotY = this.elapsed * 7 + i * 0.9;
+        tint = this._colShadeStunned;
+
+        this._stunDummy.position.set(gx, gy + 1.9 * sy, gz);
+        this._stunDummy.rotation.set(Math.PI / 2, 0, this.elapsed * 5 + i);
+        this._stunDummy.scale.setScalar(1);
+        this._stunDummy.updateMatrix();
+        this.shadeStunInst.setMatrixAt(stunCount++, this._stunDummy.matrix);
       } else if (s.state === 'drain') {
-        view.group.scale.set(1.05, 1.08, 1.05);
-        view.bodyMat.color.set(PALETTE.shadeBody);
-        view.bodyMat.emissiveIntensity = 1.15 + Math.sin(this.elapsed * 8) * 0.3;
-        view.stunRing.visible = false;
-      } else {
-        view.group.scale.set(1, 1, 1);
-        view.bodyMat.color.set(PALETTE.shadeBody);
-        view.bodyMat.emissiveIntensity = 0.75;
-        view.stunRing.visible = false;
-        view.group.rotation.y = Math.atan2(
-          this.playerGroup.position.x - s.pos[0],
-          this.playerGroup.position.z - s.pos[2]
-        );
+        sx = 1.05;
+        sy = 1.08;
+        sz = 1.05;
+        tint = this._colShadeDrain;
       }
+
+      this._dummy.position.set(gx, gy, gz);
+      this._dummy.rotation.set(0, rotY, 0);
+      this._dummy.scale.set(sx, sy, sz);
+      this._dummy.updateMatrix();
+      this.shadeBodyInst.setMatrixAt(bodyCount, this._dummy.matrix);
+      this.shadeBodyInst.setColorAt(bodyCount, tint);
+      bodyCount += 1;
+
+      const cosY = Math.cos(rotY);
+      const sinY = Math.sin(rotY);
+      const eyeScale = Math.min(sx, sy);
+      const ey = gy + 1.15 * sy;
+
+      this._eyeDummy.rotation.set(0, 0, 0);
+      this._eyeDummy.scale.setScalar(eyeScale);
+
+      // Left eye (-0.15, 1.15, 0.34) rotated around Y
+      this._eyeDummy.position.set(
+        gx + sx * (-0.15 * cosY + 0.34 * sinY),
+        ey,
+        gz + sz * (0.15 * sinY + 0.34 * cosY)
+      );
+      this._eyeDummy.updateMatrix();
+      this.shadeEyeInst.setMatrixAt(eyeCount++, this._eyeDummy.matrix);
+
+      // Right eye (+0.15, 1.15, 0.34) rotated around Y
+      this._eyeDummy.position.set(
+        gx + sx * (0.15 * cosY + 0.34 * sinY),
+        ey,
+        gz + sz * (-0.15 * sinY + 0.34 * cosY)
+      );
+      this._eyeDummy.updateMatrix();
+      this.shadeEyeInst.setMatrixAt(eyeCount++, this._eyeDummy.matrix);
     }
+
+    this.shadeBodyInst.count = bodyCount;
+    this.shadeBodyInst.instanceMatrix.needsUpdate = true;
+    if (this.shadeBodyInst.instanceColor) this.shadeBodyInst.instanceColor.needsUpdate = true;
+
+    this.shadeEyeInst.count = eyeCount;
+    this.shadeEyeInst.instanceMatrix.needsUpdate = true;
+
+    this.shadeStunInst.count = stunCount;
+    this.shadeStunInst.instanceMatrix.needsUpdate = true;
   }
 
   _syncDrifters(drifters) {
@@ -1006,14 +1125,14 @@ export class IslandRenderer {
     }
   }
 
-  projectToScreen(worldPos) {
-    const vec = new THREE.Vector3(worldPos[0], worldPos[1] + 2.4, worldPos[2]);
-    vec.project(this.camera);
+  projectToScreen(worldPos, yOffset = 2.4) {
+    this._projVec.set(worldPos[0], worldPos[1] + yOffset, worldPos[2]);
+    this._projVec.project(this.camera);
     const w = this.container.clientWidth;
-    const h = this.container.clientHeight;
-    const behind = vec.z > 1;
-    let sx = (vec.x * 0.5 + 0.5) * w;
-    let sy = (-vec.y * 0.5 + 0.5) * h;
+    const h = Math.max(1, this.container.clientHeight);
+    const behind = this._projVec.z > 1;
+    let sx = (this._projVec.x * 0.5 + 0.5) * w;
+    let sy = (-this._projVec.y * 0.5 + 0.5) * h;
     if (behind) {
       sx = w - sx;
       sy = h - sy;
@@ -1023,15 +1142,73 @@ export class IslandRenderer {
     return { x: sx, y: sy, onScreen, angleRad, w, h };
   }
 
-  render(sim, cameraInput, dt) {
-    this.elapsed += dt;
+  _updateCamera(sim, cameraInput, dt) {
+    if (cameraInput && Array.isArray(cameraInput.overridePos)) {
+      const [cx, cy, cz] = cameraInput.overridePos;
+      const [tx, ty, tz] = cameraInput.overrideLookAt || [0, 0, 0];
+      if (this.camera.fov !== 55) {
+        this.camera.fov = 55;
+        this.camera.updateProjectionMatrix();
+      }
+      this.camera.position.set(cx, cy, cz);
+      this._overrideLookAt.set(tx, ty, tz);
+      this.camera.lookAt(this._overrideLookAt);
+      return;
+    }
 
+    const p = sim.player.pos;
     const camState =
       typeof cameraInput === 'number'
         ? { yawDeg: cameraInput, pitchDeg: 24, dist: 10.5 }
         : cameraInput;
 
-    // Player sync & realistic locomotion animation
+    const yawRad = (camState.yawDeg * Math.PI) / 180;
+    const pitchRad = (camState.pitchDeg * Math.PI) / 180;
+    const horiz = camState.dist * Math.cos(pitchRad);
+    const vert = camState.dist * Math.sin(pitchRad);
+
+    this._desiredTarget.set(p[0], Math.max(-2, p[1] + 1.35), p[2]);
+    this._desiredPos.set(
+      p[0] + Math.sin(yawRad) * horiz,
+      Math.max(1.2, p[1] + 1.1 + vert),
+      p[2] + Math.cos(yawRad) * horiz
+    );
+
+    if (!this._camInitialized) {
+      this._camPos.copy(this._desiredPos);
+      this._camTarget.copy(this._desiredTarget);
+      this._camInitialized = true;
+    } else {
+      const alpha = 1 - Math.exp(-16 * Math.min(0.05, dt));
+      this._camPos.lerp(this._desiredPos, alpha);
+      this._camTarget.lerp(this._desiredTarget, alpha);
+    }
+
+    const targetFov = this.reducedMotion ? 55 : (sim.player.dashActiveTicks > 0 || sim.player.launched ? 63 : 55);
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-10 * dt));
+      this.camera.updateProjectionMatrix();
+    }
+
+    this.camera.position.copy(this._camPos);
+    if (!this.reducedMotion && this._shakeTrauma > 0.001) {
+      const s = this._shakeTrauma * this._shakeTrauma * 0.35;
+      this.camera.position.x += Math.sin(this.elapsed * 65) * s;
+      this.camera.position.y += Math.cos(this.elapsed * 53) * s;
+      this._shakeTrauma = Math.max(0, this._shakeTrauma - dt * 2.2);
+    } else {
+      this._shakeTrauma = 0;
+    }
+
+    this.camera.lookAt(this._camTarget);
+  }
+
+  render(sim, cameraInput, dt) {
+    this.elapsed += dt;
+
+    // Update camera first so instanced billboards and fuel bars orient cleanly this frame
+    this._updateCamera(sim, cameraInput, dt);
+
     const p = sim.player.pos;
     const horizSpeed = Math.hypot(sim.player.vel[0], sim.player.vel[2]);
     this.playerGroup.position.set(p[0], p[1], p[2]);
@@ -1052,19 +1229,23 @@ export class IslandRenderer {
       this.hatLanternPivot.rotation.z = Math.cos(this.elapsed * 1.7) * 0.06;
     }
 
-    if (this._wasGrounded && !sim.player.grounded && sim.player.vel[1] > 2) {
-      this._spawnBurstParticles(p, PALETTE.sand, 6, 1.8);
-    } else if (!this._wasGrounded && sim.player.grounded) {
-      this._spawnBurstParticles(p, PALETTE.sand, 8, 2.3);
+    if (!this.benchMode) {
+      if (this._wasGrounded && !sim.player.grounded && sim.player.vel[1] > 2) {
+        this._spawnBurstParticles(p, PALETTE.sand, 6, 1.8);
+      } else if (!this._wasGrounded && sim.player.grounded) {
+        this._spawnBurstParticles(p, PALETTE.sand, 8, 2.3);
+      }
     }
     this._wasGrounded = sim.player.grounded;
 
     if (sim.player.dashActiveTicks > 0) {
       this.playerGroup.scale.set(0.84, 0.92, 1.28);
-      this._dashFxAccum += dt;
-      if (this._dashFxAccum >= 0.03) {
-        this._dashFxAccum = 0;
-        this._spawnBurstParticles(p, PALETTE.goldAccent, 3, 1.1);
+      if (!this.benchMode) {
+        this._dashFxAccum += dt;
+        if (this._dashFxAccum >= 0.03) {
+          this._dashFxAccum = 0;
+          this._spawnBurstParticles(p, PALETTE.goldAccent, 3, 1.1);
+        }
       }
     } else {
       this.playerGroup.scale.set(1, 1, 1);
@@ -1081,7 +1262,6 @@ export class IslandRenderer {
       this.playerGroup.visible = true;
     }
 
-    // Lanterns sync (fuel bars, 1Hz low-fuel blink, unlit squash + tears)
     let litCount = 0;
     const blinkOn = Math.sin(this.elapsed * Math.PI * 2) >= 0;
     const dangerHex = this.colorblindMode ? COLORBLIND_PALETTE.uiDanger : PALETTE.uiDanger;
@@ -1109,7 +1289,7 @@ export class IslandRenderer {
           view.haloMat.opacity = blinkOn ? 0.55 : 0.1;
           view.fuelFillMat.color.set(dangerHex);
           view.fuelFillMat.opacity = blinkOn ? 1.0 : 0.3;
-          view.safeRingMat.opacity = 0; // Fuel < 30 loses safe zone
+          view.safeRingMat.opacity = 0;
         } else {
           view.coreMat.emissiveIntensity = 1.85;
           view.light.intensity = 4.8;
@@ -1125,7 +1305,7 @@ export class IslandRenderer {
         }
       } else {
         view.wasLit = false;
-        view.bodyGroup.scale.set(1.06, 0.8, 1.06); // Squashed 20% when unlit
+        view.bodyGroup.scale.set(1.06, 0.8, 1.06);
         for (const tear of view.tears) tear.visible = true;
         view.fuelBarGroup.visible = false;
 
@@ -1140,18 +1320,18 @@ export class IslandRenderer {
       }
     }
 
-    // Exact TICKET-02 ambient intensity formula: 0.15 + 0.55 * (lit / total)
     const litRatio = sim.lanterns.length > 0 ? litCount / sim.lanterns.length : 0;
     this.ambientLight.intensity = 0.15 + 0.55 * litRatio;
     this.scene.fog.density = THREE.MathUtils.lerp(0.0145, 0.0085, litRatio);
 
     this._syncMotes(sim.motes);
     this._syncShades(sim.shades);
-    this._syncDrifters(sim.drifters);
-    this._syncCharms(sim.charms);
+    if (!this.benchMode) {
+      this._syncDrifters(sim.drifters);
+      this._syncCharms(sim.charms);
+    }
 
-    // Instanced grass sway
-    if (this.grassTufts) {
+    if (!this.benchMode && this.grassTufts) {
       const windExtra = sim.windEnabled && sim.wind.active ? 0.28 : 0;
       for (let i = 0; i < this.grassMeta.length; i += 1) {
         const s = this.grassMeta[i];
@@ -1174,70 +1354,69 @@ export class IslandRenderer {
       this.bellMesh.rotation.z = Math.sin(this.elapsed * swingSpeed) * swingAmp;
     }
 
-    // Wind leaves FX (Night 3 warning or active wind)
-    const showLeaves = sim.windEnabled && (sim.wind.warning || sim.wind.active);
-    const windSpeed = sim.wind.active ? 18 : 6;
-    const wx = sim.wind.dirVec[0];
-    const wz = sim.wind.dirVec[1];
-    for (const leaf of this.windLeaves) {
-      leaf.mesh.material.opacity = showLeaves ? 0.72 : 0;
-      if (showLeaves) {
-        leaf.mesh.position.x += wx * windSpeed * dt;
-        leaf.mesh.position.z += wz * windSpeed * dt;
-        leaf.mesh.rotation.x += dt * 5;
-        leaf.mesh.rotation.y += dt * 4;
-        if (Math.hypot(leaf.mesh.position.x, leaf.mesh.position.z) > 48) {
-          leaf.mesh.position.x = -wx * 44 + Math.sin(leaf.phase) * 18;
-          leaf.mesh.position.z = -wz * 44 + Math.cos(leaf.phase) * 18;
-        }
-      }
-    }
-
-    // Guiding Wisp (prioritize weak lit lanterns when carrying motes, else unlit lantern when ready)
-    let guideTarget = null;
-    if (sim.player.carried > 0) {
-      let bestWeakDist = Infinity;
-      for (const l of sim.lanterns) {
-        if (!l.lit || l.fuel60 >= LOW_FUEL_60) continue;
-        const d = distXZ(sim.player.pos, l.pos);
-        if (d < bestWeakDist) {
-          bestWeakDist = d;
-          guideTarget = l;
-        }
-      }
-      if (!guideTarget) {
-        let bestUnlitDist = Infinity;
-        for (const l of sim.lanterns) {
-          if (l.lit) continue;
-          const needed = sim.getLanternCost(l) - l.deposited;
-          if (sim.player.carried < needed) continue;
-          const d = distXZ(sim.player.pos, l.pos);
-          if (d < bestUnlitDist) {
-            bestUnlitDist = d;
-            guideTarget = l;
+    if (!this.benchMode) {
+      const showLeaves = sim.windEnabled && (sim.wind.warning || sim.wind.active);
+      const windSpeed = sim.wind.active ? 18 : 6;
+      const wx = sim.wind.dirVec[0];
+      const wz = sim.wind.dirVec[1];
+      for (const leaf of this.windLeaves) {
+        leaf.mesh.material.opacity = showLeaves ? 0.72 : 0;
+        if (showLeaves) {
+          leaf.mesh.position.x += wx * windSpeed * dt;
+          leaf.mesh.position.z += wz * windSpeed * dt;
+          leaf.mesh.rotation.x += dt * 5;
+          leaf.mesh.rotation.y += dt * 4;
+          if (Math.hypot(leaf.mesh.position.x, leaf.mesh.position.z) > 48) {
+            leaf.mesh.position.x = -wx * 44 + Math.sin(leaf.phase) * 18;
+            leaf.mesh.position.z = -wz * 44 + Math.cos(leaf.phase) * 18;
           }
         }
       }
-    }
-    for (const w of this.wispSparks) {
-      if (!guideTarget) {
-        w.mat.opacity = 0;
-        continue;
+
+      let guideTarget = null;
+      if (sim.player.carried > 0) {
+        let bestWeakDist = Infinity;
+        for (const l of sim.lanterns) {
+          if (!l.lit || l.fuel60 >= LOW_FUEL_60) continue;
+          const d = distXZ(sim.player.pos, l.pos);
+          if (d < bestWeakDist) {
+            bestWeakDist = d;
+            guideTarget = l;
+          }
+        }
+        if (!guideTarget) {
+          let bestUnlitDist = Infinity;
+          for (const l of sim.lanterns) {
+            if (l.lit) continue;
+            const needed = sim.getLanternCost(l) - l.deposited;
+            if (sim.player.carried < needed) continue;
+            const d = distXZ(sim.player.pos, l.pos);
+            if (d < bestUnlitDist) {
+              bestUnlitDist = d;
+              guideTarget = l;
+            }
+          }
+        }
       }
-      const u = (this.elapsed * 0.75 + w.phase) % 1;
-      const dx = guideTarget.pos[0] - p[0];
-      const dz = guideTarget.pos[2] - p[2];
-      const d = Math.max(0.1, Math.hypot(dx, dz));
-      const span = Math.min(7.5, d);
-      w.mesh.position.set(
-        p[0] + (dx / d) * (1.2 + u * span),
-        p[1] + 1.15 + Math.sin(u * Math.PI) * 0.65,
-        p[2] + (dz / d) * (1.2 + u * span)
-      );
-      w.mat.opacity = Math.sin(u * Math.PI) * 0.9;
+      for (const w of this.wispSparks) {
+        if (!guideTarget) {
+          w.mat.opacity = 0;
+          continue;
+        }
+        const u = (this.elapsed * 0.75 + w.phase) % 1;
+        const dx = guideTarget.pos[0] - p[0];
+        const dz = guideTarget.pos[2] - p[2];
+        const d = Math.max(0.1, Math.hypot(dx, dz));
+        const span = Math.min(7.5, d);
+        w.mesh.position.set(
+          p[0] + (dx / d) * (1.2 + u * span),
+          p[1] + 1.15 + Math.sin(u * Math.PI) * 0.65,
+          p[2] + (dz / d) * (1.2 + u * span)
+        );
+        w.mat.opacity = Math.sin(u * Math.PI) * 0.9;
+      }
     }
 
-    // Clouds & stars
     for (const cloud of this.cloudMeshes) {
       cloud.angle += cloud.speed * dt;
       cloud.mesh.position.x = Math.cos(cloud.angle) * cloud.radius;
@@ -1247,7 +1426,6 @@ export class IslandRenderer {
       this.starPoints.rotation.y += dt * 0.008;
     }
 
-    // Active FX cleanup
     for (let i = this.pulseWaves.length - 1; i >= 0; i -= 1) {
       const wave = this.pulseWaves[i];
       wave.age += dt;
@@ -1291,44 +1469,6 @@ export class IslandRenderer {
       }
     }
 
-    // Smooth damped 3rd-person orbit camera with pitch, scroll zoom, FOV kick, and hit shake
-    const yawRad = (camState.yawDeg * Math.PI) / 180;
-    const pitchRad = (camState.pitchDeg * Math.PI) / 180;
-    const horiz = camState.dist * Math.cos(pitchRad);
-    const vert = camState.dist * Math.sin(pitchRad);
-
-    const desiredTarget = new THREE.Vector3(p[0], Math.max(-2, p[1] + 1.35), p[2]);
-    const desiredPos = new THREE.Vector3(
-      p[0] + Math.sin(yawRad) * horiz,
-      Math.max(1.2, p[1] + 1.1 + vert),
-      p[2] + Math.cos(yawRad) * horiz
-    );
-
-    if (!this._camInitialized) {
-      this._camPos.copy(desiredPos);
-      this._camTarget.copy(desiredTarget);
-      this._camInitialized = true;
-    } else {
-      const alpha = 1 - Math.exp(-16 * Math.min(0.05, dt));
-      this._camPos.lerp(desiredPos, alpha);
-      this._camTarget.lerp(desiredTarget, alpha);
-    }
-
-    const targetFov = sim.player.dashActiveTicks > 0 || sim.player.launched ? 63 : 55;
-    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-10 * dt));
-      this.camera.updateProjectionMatrix();
-    }
-
-    this.camera.position.copy(this._camPos);
-    if (this._shakeTrauma > 0.001) {
-      const s = this._shakeTrauma * this._shakeTrauma * 0.35;
-      this.camera.position.x += Math.sin(this.elapsed * 65) * s;
-      this.camera.position.y += Math.cos(this.elapsed * 53) * s;
-      this._shakeTrauma = Math.max(0, this._shakeTrauma - dt * 2.2);
-    }
-
-    this.camera.lookAt(this._camTarget);
     this.renderer.render(this.scene, this.camera);
   }
 
