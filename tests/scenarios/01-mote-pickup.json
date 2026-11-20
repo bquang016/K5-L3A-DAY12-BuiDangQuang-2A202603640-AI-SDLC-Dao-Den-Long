@@ -1,0 +1,17 @@
+{
+  "description": "Scenario 01: Mote pickup and carry_capacity cap",
+  "player": { "pos": [0, 0, 0], "carried": 0, "flames": 3 },
+  "random_motes": false,
+  "random_shades": false,
+  "motes": [
+    [0, 0, 4],
+    [0, 0, 7],
+    [0, 0, 10],
+    [0, 0, 12],
+    [0, 0, 14],
+    [0, 0, 16],
+    [0, 0, 18]
+  ],
+  "shades": [],
+  "time_left_s": 300
+}

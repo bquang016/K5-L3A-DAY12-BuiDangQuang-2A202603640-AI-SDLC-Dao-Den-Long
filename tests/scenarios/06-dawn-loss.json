@@ -1,0 +1,9 @@
+{
+  "description": "Scenario 06: Dawn timeout triggers lost game_over when time_left_s reaches 0",
+  "player": { "pos": [0, 0, 0], "carried": 0, "flames": 3 },
+  "random_motes": false,
+  "random_shades": false,
+  "motes": [],
+  "shades": [],
+  "time_left_s": 2
+}
