@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Đảo Đèn Lồng — Đêm 1: Đảo Bến</title>
+    <style>
+      :root {
+        --bg-night: #080a1c;
+        --panel-bg: rgba(13, 16, 36, 0.78);
+        --panel-border: rgba(255, 198, 109, 0.28);
+        --gold: #ffcb6b;
+        --amber: #ff8e3c;
+        --violet: #b66dff;
+        --text-main: #f6efe2;
+        --text-muted: #b8b3c7;
+      }
+
+      * {
+        box-sizing: border-box;
+        user-select: none;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg-night);
+        color: var(--text-main);
+        font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+
+      #app {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      #hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 16px;
+        z-index: 10;
+      }
+
+      .hud-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .hud-panel {
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        padding: 10px 14px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+
+      .stat-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+
+      .stat-line:last-child {
+        margin-bottom: 0;
+      }
+
+      .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+      }
+
+      .flames-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .flame-pip {
+        width: 18px;
+        height: 18px;
+        border-radius: 50% 50% 50% 0;
+        transform: rotate(-45deg);
+        background: linear-gradient(135deg, #ffe08a, #ff7e29);
+        box-shadow: 0 0 10px rgba(255, 160, 60, 0.8);
+        transition: opacity 0.2s, transform 0.2s;
+      }
+
+      .flame-pip.lost {
+        background: rgba(160, 145, 185, 0.2);
+        box-shadow: none;
+        opacity: 0.35;
+      }
+
+      .mote-bar {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .mote-pip {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 203, 107, 0.45);
+        background: rgba(255, 203, 107, 0.08);
+        transition: all 0.15s ease;
+      }
+
+      .mote-pip.filled {
+        background: radial-gradient(circle, #fff3c4, #ffb648);
+        border-color: #ffe39b;
+        box-shadow: 0 0 8px rgba(255, 198, 90, 0.85);
+      }
+
+      .lantern-pips {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .lantern-pip {
+        width: 14px;
+        height: 18px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 203, 107, 0.35);
+        background: rgba(20, 22, 48, 0.7);
+      }
+
+      .lantern-pip.lit {
+        background: linear-gradient(180deg, #ffe69e, #ff9933);
+        border-color: #fff2c6;
+        box-shadow: 0 0 10px rgba(255, 178, 72, 0.9);
+      }
+
+      .value-strong {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--gold);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .timer-warn {
+        color: #ff7b7b;
+      }
+
+      .pulse-badge {
+        font-size: 12px;
+        padding: 4px 8px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 203, 107, 0.3);
+        background: rgba(255, 203, 107, 0.1);
+        color: var(--gold);
+      }
+
+      .pulse-badge.dim {
+        color: var(--text-muted);
+        border-color: rgba(184, 179, 199, 0.25);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .bottom-center {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+      }
+
+      .prompt-pill {
+        background: rgba(25, 18, 12, 0.88);
+        border: 1px solid rgba(255, 203, 107, 0.65);
+        color: #ffe8b3;
+        padding: 8px 16px;
+        border-radius: 999px;
+        font-size: 14px;
+        font-weight: 600;
+        box-shadow: 0 0 20px rgba(255, 170, 60, 0.35);
+        opacity: 0;
+        transform: translateY(6px);
+        transition: opacity 0.18s, transform 0.18s;
+      }
+
+      .prompt-pill.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .whisper-banner {
+        background: rgba(18, 14, 34, 0.86);
+        border: 1px solid rgba(255, 203, 107, 0.35);
+        color: #f8e5bf;
+        padding: 8px 18px;
+        border-radius: 12px;
+        font-size: 13px;
+        font-style: italic;
+        max-width: 480px;
+        text-align: center;
+        opacity: 0;
+        transition: opacity 0.4s;
+      }
+
+      .whisper-banner.visible {
+        opacity: 1;
+      }
+
+      .controls-box {
+        font-size: 12px;
+        line-height: 1.55;
+        color: var(--text-muted);
+      }
+
+      .controls-box strong {
+        color: var(--text-main);
+      }
+
+      .hud-btn {
+        pointer-events: auto;
+        cursor: pointer;
+        margin-top: 6px;
+        background: rgba(255, 203, 107, 0.14);
+        border: 1px solid rgba(255, 203, 107, 0.4);
+        color: var(--gold);
+        border-radius: 8px;
+        padding: 4px 10px;
+        font-size: 12px;
+      }
+
+      .hud-btn:hover {
+        background: rgba(255, 203, 107, 0.24);
+      }
+
+      #compass-canvas {
+        display: block;
+        width: 128px;
+        height: 128px;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(6, 7, 20, 0.78);
+        backdrop-filter: blur(6px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 30;
+        pointer-events: auto;
+      }
+
+      .modal-backdrop.hidden {
+        display: none;
+      }
+
+      .modal-card {
+        width: min(460px, 92vw);
+        background: linear-gradient(180deg, rgba(22, 20, 48, 0.96), rgba(12, 13, 30, 0.98));
+        border: 1px solid rgba(255, 203, 107, 0.42);
+        border-radius: 20px;
+        padding: 26px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+        text-align: center;
+      }
+
+      .modal-card h1 {
+        margin: 0 0 8px;
+        font-size: 26px;
+        color: var(--gold);
+      }
+
+      .modal-card p {
+        margin: 0 0 14px;
+        color: var(--text-muted);
+        line-height: 1.5;
+        font-size: 14px;
+      }
+
+      .breakdown {
+        text-align: left;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+        font-size: 13px;
+      }
+
+      .breakdown-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 3px 0;
+      }
+
+      .breakdown-row.total {
+        margin-top: 6px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255, 203, 107, 0.25);
+        font-weight: 700;
+        color: var(--gold);
+        font-size: 15px;
+      }
+
+      .primary-btn {
+        cursor: pointer;
+        border: none;
+        border-radius: 12px;
+        padding: 11px 24px;
+        font-size: 15px;
+        font-weight: 700;
+        color: #1c1205;
+        background: linear-gradient(135deg, #ffe29a, #ff993b);
+        box-shadow: 0 6px 20px rgba(255, 160, 60, 0.4);
+      }
+
+      .primary-btn:hover {
+        filter: brightness(1.06);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud"></div>
+    <script type="module" src="/src/game/main.js"></script>
+  </body>
+</html>
