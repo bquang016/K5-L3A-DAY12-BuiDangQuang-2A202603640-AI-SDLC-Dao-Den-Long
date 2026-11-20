@@ -1,6 +1,6 @@
 const LANTERN_COUNT_BY_NIGHT = { 1: 5, 2: 6, 3: 7 };
 const BUTTON_FIELDS = ['jump', 'interact', 'pulse', 'dash', 'pause'];
-const SHADE_STATES = new Set(['spawning', 'wander', 'chase', 'recoil', 'stunned']);
+const SHADE_STATES = new Set(['spawning', 'wander', 'chase', 'recoil', 'stunned', 'drain']);
 const DRIFTER_STATES = new Set(['idle', 'chase', 'flee', 'removed']);
 const MOTE_KINDS = new Set(['random', 'dropped']);
 
@@ -96,7 +96,8 @@ export function validateScenario(data, night = 1) {
       'invuln_ticks',
       'dash_cd_ticks',
       'pulse_cd_ticks',
-      'charm_ticks'
+      'charm_ticks',
+      'successful_lights'
     ]) {
       if (data.player[intField] !== undefined && !isNonNegInt(data.player[intField])) {
         throw new ValidationError(`scenario.player.${intField} must be a non-negative integer.`);
@@ -153,6 +154,15 @@ export function validateScenario(data, night = 1) {
       }
       if (s.state_ticks_left !== undefined && !isNonNegInt(s.state_ticks_left)) {
         throw new ValidationError(`scenario.shades[${i}].state_ticks_left must be a non-negative integer.`);
+      }
+      if (
+        s.target_lantern_id !== undefined &&
+        s.target_lantern_id !== null &&
+        (typeof s.target_lantern_id !== 'string' || !validLanternIds.has(s.target_lantern_id))
+      ) {
+        throw new ValidationError(
+          `scenario.shades[${i}].target_lantern_id must be a valid lantern ID for night ${night}.`
+        );
       }
     }
   }
@@ -224,6 +234,12 @@ export function validateScenario(data, night = 1) {
       }
       if (l.lit !== undefined && typeof l.lit !== 'boolean') {
         throw new ValidationError(`scenario.lanterns[${i}].lit must be a boolean.`);
+      }
+      if (l.fuel !== undefined && (!isFiniteNumber(l.fuel) || l.fuel < 0 || l.fuel > 100)) {
+        throw new ValidationError(`scenario.lanterns[${i}].fuel must be in [0, 100].`);
+      }
+      if (l.ever_lit !== undefined && typeof l.ever_lit !== 'boolean') {
+        throw new ValidationError(`scenario.lanterns[${i}].ever_lit must be a boolean.`);
       }
     }
   }

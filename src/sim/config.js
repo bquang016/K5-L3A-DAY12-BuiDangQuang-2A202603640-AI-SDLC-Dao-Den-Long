@@ -20,6 +20,22 @@ export const SHADE_FIRST_SPAWN_TICK = 300;
 export const SHADE_SPEED_NIGHT3 = 4.5;
 export const SAFE_PUSH_MAX_TICKS = 30;
 
+export const SHADE_DRAIN_RADIUS = 2.0;
+export const SHADE_DRAIN_DETECT_PLAYER_RADIUS = 6.0;
+export const FUEL_DRAIN_EVENT_INTERVAL = 60;
+
+// Integer 1/60 fuel units to prevent floating-point drift
+export const FUEL_SCALE = 60;
+export const FUEL_MAX_60 = 6000;
+export const LOW_FUEL_60 = 1800;
+export const FUEL_DECAY_60 = 1;
+export const FUEL_DRAIN_60 = 5;
+export const FUEL_PER_MOTE_60 = 600;
+
+export const SCORE_RELIGHT = 40;
+export const SCORE_STUN_DRAINING = 15;
+export const SCORE_DAWN_LANTERN_BASE = 50;
+
 export const MOTE_INITIAL_COUNT = 20;
 export const MOTE_MAX_COUNT = 30;
 export const MOTE_SPAWN_INTERVAL_TICKS = 240;
@@ -68,6 +84,11 @@ export const PALETTE = {
   uiText: '#F5F1E6'
 };
 
+export const COLORBLIND_PALETTE = {
+  shadeRim: '#00B3FF',
+  uiDanger: '#FFFFFF'
+};
+
 export const DEFAULT_TUNING = {
   player_speed: 6.0,
   carry_capacity: 10,
@@ -77,9 +98,9 @@ export const DEFAULT_TUNING = {
   interact_radius: 2.0,
   pulse_cost: 3,
   pulse_radius: 5.0,
-  night1_duration_s: 300,
-  night2_duration_s: 330,
-  night3_duration_s: 360,
+  night1_duration_s: 240,
+  night2_duration_s: 270,
+  night3_duration_s: 300,
   flames: 3,
   invuln_s: 1.5,
   hit_drop_ratio: 0.5,
@@ -93,11 +114,19 @@ export const DEFAULT_TUNING = {
   dash_speed: 14.0,
   dash_duration_s: 0.2,
   dash_cooldown_s: 1.5,
+  fuel_max: 100,
+  fuel_decay_per_s: 1.0,
+  fuel_per_mote: 10,
+  relight_cost: 5,
+  win_ratio: 0.6,
+  drain_per_s: 5,
+  low_fuel_threshold: 30,
+  capacity_max: 20,
   score: {
-    per_mote: 10,
+    per_mote: 5,
     per_lantern: 100,
     per_stun: 5,
-    per_second_left: 2,
+    per_second_left: 0,
     per_flame_left: 50
   }
 };

@@ -1,10 +1,10 @@
 {
-  "description": "Scenario 05 (v1.1): Lit lantern safe_radius keeps shade out for 300 ticks",
+  "description": "Scenario 05 (v1.2): Lit lantern with fuel >= 30 keeps safe_radius=6 active over 300 ticks",
   "player": { "pos": [0, 0, 0], "carried": 0, "flames": 3 },
   "random_motes": false,
   "random_shades": false,
   "motes": [],
-  "lanterns": [{ "id": "L1", "pos": [0, 0, 0], "lit": true }],
+  "lanterns": [{ "id": "L1", "pos": [0, 0, 0], "lit": true, "fuel": 100 }],
   "shades": [{ "id": "S1", "pos": [9, 0.8, 0] }],
-  "time_left_s": 300
+  "time_left_s": 240
 }

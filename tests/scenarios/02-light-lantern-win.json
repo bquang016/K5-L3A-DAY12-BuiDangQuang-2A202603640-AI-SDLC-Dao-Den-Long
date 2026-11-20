@@ -1,5 +1,5 @@
 {
-  "description": "Scenario 02 (v1.1): Deposit 10 motes to light L1, win with standardized bonus score",
+  "description": "Scenario 02 (v1.2): Lighting all 5 lanterns does not end early; surviving to dawn wins with dawn_survived",
   "player": { "pos": [0, 0, 20], "carried": 10, "flames": 3 },
   "random_motes": false,
   "random_shades": false,
@@ -7,10 +7,10 @@
   "shades": [],
   "lanterns": [
     { "id": "L1", "pos": [0, 0, 25], "deposited": 0, "lit": false },
-    { "id": "L2", "lit": true },
-    { "id": "L3", "lit": true },
-    { "id": "L4", "lit": true },
-    { "id": "L5", "lit": true }
+    { "id": "L2", "lit": true, "fuel": 100 },
+    { "id": "L3", "lit": true, "fuel": 100 },
+    { "id": "L4", "lit": true, "fuel": 100 },
+    { "id": "L5", "lit": true, "fuel": 100 }
   ],
-  "time_left_s": 300
+  "time_left_s": 2
 }

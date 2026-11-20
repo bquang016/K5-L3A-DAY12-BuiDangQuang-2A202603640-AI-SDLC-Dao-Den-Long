@@ -1,0 +1,10 @@
+{
+  "description": "Scenario 15: Refueling weak lantern above 30 restores safe_radius and pushes inside shade out safely",
+  "player": { "pos": [0, 0, 25], "carried": 5, "flames": 3 },
+  "random_motes": false,
+  "random_shades": false,
+  "motes": [],
+  "lanterns": [{ "id": "L1", "pos": [0, 0, 25], "lit": true, "fuel": 22.0 }],
+  "shades": [{ "id": "S1", "pos": [0, 0.8, 20.5], "state": "wander" }],
+  "time_left_s": 240
+}

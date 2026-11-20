@@ -1,0 +1,14 @@
+{
+  "description": "Scenario 14: Lantern decays at 1/s, burns out (lantern_out), and relights with relight_cost=5 (+40 pts)",
+  "player": { "pos": [0, 0, 25], "carried": 5, "flames": 3 },
+  "random_motes": false,
+  "random_shades": false,
+  "motes": [],
+  "shades": [],
+  "lanterns": [
+    { "id": "L1", "pos": [0, 0, 25], "lit": true, "fuel": 1.0 },
+    { "id": "L2", "lit": true, "fuel": 100 },
+    { "id": "L3", "lit": true, "fuel": 100 }
+  ],
+  "time_left_s": 240
+}

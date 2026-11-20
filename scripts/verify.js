@@ -20,19 +20,19 @@ function runCommand(cmd, args) {
   });
 }
 
-// 1. Contract v1.1 tuning sync check
+// 1. Contract v1.2 tuning sync check
 try {
   const contract = JSON.parse(fs.readFileSync(path.join(ROOT, 'game.contract.json'), 'utf8'));
   const same =
-    contract.contract_version === '1.1' &&
+    contract.contract_version === '1.2' &&
     JSON.stringify(contract.tuning) === JSON.stringify(DEFAULT_TUNING);
   record(
-    'Contract v1.1 Sync',
+    'Contract v1.2 Sync',
     same,
-    same ? 'contract_version=1.1 & tuning == DEFAULT_TUNING' : 'Contract mismatch'
+    same ? 'contract_version=1.2 & tuning == DEFAULT_TUNING' : 'Contract mismatch'
   );
 } catch (err) {
-  record('Contract v1.1 Sync', false, err.message);
+  record('Contract v1.2 Sync', false, err.message);
 }
 
 // 2. Unit & Contract test suite
@@ -69,17 +69,17 @@ for (const night of [1, 2, 3]) {
   }
 }
 
-// 4. Full Night 3 Performance Gate (<= 21,600 ticks in <= 30s)
+// 4. Full Night 3 Performance Gate (<= 18,000 ticks in <= 30s)
 const perfOut = path.join(tmpDir, 'perf-night3.jsonl');
 const t0 = performance.now();
 const perfRes = runCommand(process.execPath, [
-  'src/headless/cli.js', '--seed', '42', '--night', '3', '--ticks', '21600', '--out', perfOut
+  'src/headless/cli.js', '--seed', '42', '--night', '3', '--ticks', '18000', '--out', perfOut
 ]);
 const elapsedMs = Math.round(performance.now() - t0);
 if (perfRes.status === 0) {
   const lines = fs.readFileSync(perfOut, 'utf8').trim().split('\n').length;
   record(
-    'Full Night 3 Performance (21600 ticks <= 30s)',
+    'Full Night 3 Performance (18000 ticks <= 30s)',
     elapsedMs <= 30000,
     `${elapsedMs} ms (${lines} JSONL lines)`
   );

@@ -18,7 +18,7 @@ function normalizeXZ(dx, dz) {
 const NIGHT1_MAP = {
   night: 1,
   name: 'Đảo Bến',
-  durationS: 300,
+  durationS: 240,
   spawnPos: [0, 0, 0],
   shadeSpeed: 4.0,
   shadeIntervalTicks: 480,
@@ -49,7 +49,7 @@ const NIGHT1_MAP = {
 const NIGHT2_MAP = {
   night: 2,
   name: 'Đảo Cau',
-  durationS: 330,
+  durationS: 270,
   spawnPos: [0, 0, 0],
   shadeSpeed: 4.0,
   shadeIntervalTicks: 420,
@@ -121,7 +121,7 @@ const NIGHT3_RAMPS = createNight3Ramps();
 const NIGHT3_MAP = {
   night: 3,
   name: 'Đảo Chuông',
-  durationS: 360,
+  durationS: 300,
   spawnPos: [0, 0, -15],
   shadeSpeed: 4.5,
   shadeIntervalTicks: 360,

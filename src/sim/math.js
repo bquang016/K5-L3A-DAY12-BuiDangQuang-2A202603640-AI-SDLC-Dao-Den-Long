@@ -1,3 +1,8 @@
+export function round1(n) {
+  const r = Math.round(n * 10) / 10;
+  return Object.is(r, -0) ? 0 : r;
+}
+
 export function round3(n) {
   const r = Math.round(n * 1000) / 1000;
   return Object.is(r, -0) ? 0 : r;
@@ -21,7 +26,7 @@ export function clampToCircleXZ(pos, maxRadius) {
 }
 
 /**
- * Transform [x, z] input movement by camera yaw in degrees per Test Contract v1.0:
+ * Transform [x, z] input movement by camera yaw in degrees per Test Contract:
  *   x' = x*cos(theta) + z*sin(theta)
  *   z' = -x*sin(theta) + z*cos(theta)
  * Vectors longer than 1 are normalized to unit length.
