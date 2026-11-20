@@ -24,3 +24,16 @@
 ### 3. Tiết kiệm token & Đánh giá Phase 2
 - **Tiết kiệm token**: Tái sử dụng nguyên kiến trúc `LanternIslandSim` + `IslandRenderer` từ Phase 1 thay vì viết lại từ đầu; gộp viết song song 13 scenario và bộ test; dùng hình học thủ tục nhẹ (`three`) giữ runtime 21.600 tick chỉ `187 ms`.
 - **Đánh giá**: Toàn bộ 26 test, tính tất định 3 Đêm, hiệu năng `187 ms <= 30.000 ms`, và build Vite đều đạt. Đo FPS trình duyệt `1280x720` cần chạy thực tế trên máy có GPU/WebGL qua `npm run dev`.
+
+---
+
+## Phase 3 — Đèn cạn dầu (`TICKET-03` / Contract `v1.2`)
+
+### 1. Quy trình & Xử lý Change Request
+1. Đọc kỹ các phần `[THAY THẾ]` trong `TICKET-03`, cập nhật trước [AGENTS.md](../../AGENTS.md) và [.agents/skills/verify-phase/SKILL.md](../../.agents/skills/verify-phase/SKILL.md) cho Contract `v1.2`.
+2. Lập ADR [adr-001-lantern-fuel-and-dawn-survival.md](adr-001-lantern-fuel-and-dawn-survival.md) giải thích mô hình nhiên liệu nguyên `fuel60` (`1/60`), trạng thái `drain`, luật thắng `dawn_survived` và [CHANGELOG.md](../../CHANGELOG.md) liệt kê các thay đổi phá vỡ tương thích.
+3. Cập nhật có chủ đích các test Phase 1–2 bị thay thế (`02`, `05`, đơn vị tính điểm) và bổ sung 5 scenario mới (`14..18`) nâng tổng lên **32/32 test xanh ngay lần chạy đầu**.
+
+### 2. Tiết kiệm token & Kiểm chứng Phase 3
+- **Tiết kiệm token**: Chỉnh sửa theo điểm (targeted edits) trên `renderer.js`, `maps.js`, `main.js`; gộp viết đồng thời toàn bộ scenario, ADR, changelog và proof trước khi chạy `npm run verify` một lượt.
+- **Đánh giá**: `32/32` unit + contract tests đạt, determinism 3 Đêm khớp byte-for-byte, `18.000` tick Đêm 3 chạy `552 ms` (`<= 30s`), Vite build sạch. Kiểm tra trực quan thanh dầu, nhấp nháy `1 Hz` và chế độ Mù màu cần chơi thử trên trình duyệt qua `npm run dev`.
