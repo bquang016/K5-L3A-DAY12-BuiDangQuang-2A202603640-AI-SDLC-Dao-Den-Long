@@ -16,6 +16,10 @@
         --text-muted: #b8c2d9;
       }
 
+      body.colorblind {
+        --danger: #ffffff;
+      }
+
       * {
         box-sizing: border-box;
         user-select: none;
@@ -234,8 +238,22 @@
 
       .mote-bar {
         display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 240px;
         gap: 5px;
         align-items: center;
+      }
+
+      .alert-banner {
+        padding: 5px 14px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        background: rgba(14, 20, 48, 0.9);
+        border: 1px solid var(--danger);
+        color: var(--danger);
+        display: none;
       }
 
       .mote-pip {

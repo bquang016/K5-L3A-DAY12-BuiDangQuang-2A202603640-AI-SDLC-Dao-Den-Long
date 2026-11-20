@@ -1,20 +1,21 @@
+import { FUEL_SCALE, LOW_FUEL_60 } from '../sim/config.js';
 import { distXZ } from '../sim/math.js';
 
 const NIGHT_INTROS = {
   1: {
     title: 'Đêm 1 · Đảo Bến',
     quote:
-      'Ông Đăng dặn: "Mây ơi, Đảo Bến là cửa ngõ của biển mây. Hãy thu đủ 10 đom đóm cho mỗi Đèn Lồng Lớn, cẩn thận mép đảo và dùng Tỏa Sáng khi Bóng Mực áp sát."'
+      'Ông Đăng dặn: "Mây ơi, sương đêm nay nuốt dầu nhanh lắm! Đèn sẽ tự cạn dần, hãy giữ ít nhất 3/5 Đèn Lồng còn sáng tới khi bình minh ló dạng (240s). Đèn tắt nhớ thắp lại chỉ tốn 5 đom đóm thôi!"'
   },
   2: {
     title: 'Đêm 2 · Đảo Cau',
     quote:
-      'Ông Đăng dặn: "Đảo Cau chia làm hai bờ nối bằng cầu tre mảnh và bục nhảy gió. Hãy dè chừng Gió Lạc rình rập cướp ánh sáng khi con mang từ 5 đom đóm trở lên!"'
+      'Ông Đăng dặn: "Đêm nay cần giữ ít nhất 4/6 đèn sáng suốt 270s! Khi dầu xuống dưới 30, vùng an toàn sẽ biến mất và Bóng Mực sẽ lao tới hút cạn dầu. Hãy châm dầu kịp thời nhé!"'
   },
   3: {
     title: 'Đêm 3 · Đảo Chuông',
     quote:
-      'Ông Đăng dặn: "Đảo Chuông có ba tầng vách dựng và cơn gió đêm dữ dội. Men theo hai con dốc 30° và 150° rồi nhờ bục nhảy lên đỉnh tháp chuông thắp ngọn đèn cuối nhé!"'
+      'Ông Đăng dặn: "Thử thách cuối cùng trên Đảo Chuông (300s): giữ tối thiểu 5/7 đèn sáng tới bình minh! Thắp và châm dầu càng nhiều, túi ánh sáng của con càng mở rộng tới 20 ô!"'
   }
 };
 
@@ -75,12 +76,12 @@ export class GameHud {
 
         <div class="hud-panel timer-box justify-center">
           <div class="label" id="hud-night-label">Đêm 1 · Đảo Bến</div>
-          <div class="timer-value" id="hud-timer">05:00</div>
+          <div class="timer-value" id="hud-timer">04:00</div>
         </div>
 
         <div class="hud-panel justify-end" style="text-align:right;">
           <div class="stat-line" style="justify-content:flex-end;">
-            <span class="label">Đèn</span>
+            <span class="label" id="hud-lantern-goal">Đèn (cần ≥3)</span>
             <div class="lantern-pips" id="hud-lanterns"></div>
             <span class="value-gold" id="hud-lantern-count">0/5</span>
           </div>
@@ -92,6 +93,7 @@ export class GameHud {
       </div>
 
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div id="hud-lowfuel-banner" class="alert-banner"></div>
         <div id="hud-wind-banner" class="wind-banner" style="display:none;"></div>
         <div class="lock-hint-pill" id="hud-lock-hint">Nhấp vào màn hình để ẩn chuột xoay 360° · [C] Đổi chế độ chuột</div>
         <div class="whisper-banner" id="hud-whisper"></div>
@@ -100,7 +102,7 @@ export class GameHud {
 
       <div class="hud-bottom">
         <div class="hud-panel justify-start" style="font-size:12px;color:#b8c2d9;line-height:1.5;">
-          <div><strong>WASD</strong> Đi · <strong>Space</strong> Nhảy · <strong>Shift</strong> Lướt · <strong>E</strong> Nạp · <strong>Q</strong> Tỏa Sáng</div>
+          <div><strong>WASD</strong> Đi · <strong>Space</strong> Nhảy · <strong>Shift</strong> Lướt · <strong>E</strong> Nạp/Châm dầu · <strong>Q</strong> Tỏa Sáng</div>
           <div><strong>Chuột</strong> Xoay 360° · <strong>Cuộn</strong> Zoom · <strong>[C]</strong> Ẩn/hiện chuột · <strong>Esc/P</strong> Dừng</div>
         </div>
 
@@ -133,7 +135,7 @@ export class GameHud {
       <div class="modal-backdrop" id="menu-modal">
         <div class="modal-card">
           <h1>Đảo Đèn Lồng</h1>
-          <p>Hành trình qua Ba Hòn Đảo: Đảo Bến · Đảo Cau · Đảo Chuông</p>
+          <p>Giữ ánh sáng qua Ba Hòn Đảo cho tới Bình Minh</p>
           <div class="btn-col">
             <button class="primary-btn" id="btn-campaign">Chơi chuỗi 3 Đêm (Từ Đêm 1)</button>
             <div class="btn-row">
@@ -141,7 +143,7 @@ export class GameHud {
               <button class="secondary-btn" data-night="2">Đêm 2 · Đảo Cau</button>
               <button class="secondary-btn" data-night="3">Đêm 3 · Đảo Chuông</button>
             </div>
-            <button class="secondary-btn" id="btn-menu-settings">Cài đặt (Âm thanh & Chuột)</button>
+            <button class="secondary-btn" id="btn-menu-settings">Cài đặt (Âm thanh, Chuột & Mù màu)</button>
           </div>
         </div>
       </div>
@@ -184,6 +186,10 @@ export class GameHud {
             <span>Khóa chuột xoay 360° (Ẩn con trỏ)</span>
             <input type="checkbox" id="set-pointer-lock" checked />
           </label>
+          <label class="setting-check" for="set-colorblind">
+            <span>Bảng màu dễ phân biệt (Mù màu)</span>
+            <input type="checkbox" id="set-colorblind" />
+          </label>
           <button class="primary-btn" id="btn-settings-close">Lưu & Đóng</button>
         </div>
       </div>
@@ -210,9 +216,11 @@ export class GameHud {
     this.elCharmTag = this.root.querySelector('#hud-charm-tag');
     this.elNightLabel = this.root.querySelector('#hud-night-label');
     this.elTimer = this.root.querySelector('#hud-timer');
+    this.elLanternGoal = this.root.querySelector('#hud-lantern-goal');
     this.elLanterns = this.root.querySelector('#hud-lanterns');
     this.elLanternCount = this.root.querySelector('#hud-lantern-count');
     this.elScore = this.root.querySelector('#hud-score');
+    this.elLowFuelBanner = this.root.querySelector('#hud-lowfuel-banner');
     this.elWindBanner = this.root.querySelector('#hud-wind-banner');
     this.elWhisper = this.root.querySelector('#hud-whisper');
     this.elPrompt = this.root.querySelector('#hud-prompt');
@@ -235,6 +243,7 @@ export class GameHud {
     this.sensSlider = this.root.querySelector('#set-sens');
     this.sensLabel = this.root.querySelector('#set-sens-val');
     this.lockCheckbox = this.root.querySelector('#set-pointer-lock');
+    this.cbCheckbox = this.root.querySelector('#set-colorblind');
 
     this.syncSettingsUi(this.settings);
 
@@ -280,7 +289,8 @@ export class GameHud {
       this.callbacks.onSettingsChange?.({
         volume: Number(this.volSlider.value) / 100,
         mouseSensitivity: Number(this.sensSlider.value),
-        pointerLockEnabled: this.lockCheckbox.checked
+        pointerLockEnabled: this.lockCheckbox.checked,
+        colorblindMode: this.cbCheckbox.checked
       });
     };
 
@@ -293,6 +303,7 @@ export class GameHud {
       emitSettings();
     });
     this.lockCheckbox.addEventListener('change', emitSettings);
+    this.cbCheckbox.addEventListener('change', emitSettings);
 
     this.root.querySelector('#btn-settings-close').addEventListener('click', () => {
       this.settingsModal.classList.add('hidden');
@@ -312,12 +323,14 @@ export class GameHud {
     this.sensSlider.value = String(settings.mouseSensitivity);
     this.sensLabel.textContent = `${settings.mouseSensitivity.toFixed(1)}x`;
     this.lockCheckbox.checked = Boolean(settings.pointerLockEnabled);
+    this.cbCheckbox.checked = Boolean(settings.colorblindMode);
     this.elLockBadge.textContent = `[C] Ẩn chuột: ${settings.pointerLockEnabled ? 'Bật' : 'Tắt (Kéo chuột)'}`;
+    document.body.classList.toggle('colorblind', Boolean(settings.colorblindMode));
   }
 
   flashHit() {
-    this.elFlash.style.background =
-      'radial-gradient(circle, rgba(255,90,95,0) 45%, rgba(255,90,95,0.55) 100%)';
+    const color = this.settings.colorblindMode ? 'rgba(255,255,255,0.5)' : 'rgba(255,90,95,0.55)';
+    this.elFlash.style.background = `radial-gradient(circle, rgba(0,0,0,0) 45%, ${color} 100%)`;
     this.elFlash.style.opacity = '1';
     this.flashTimer = 0.28;
   }
@@ -372,24 +385,25 @@ export class GameHud {
     if (won && sim.night === 3 && isCampaignWin) {
       titleEl.textContent = 'Bình Minh Trên Ba Hòn Đảo!';
       subEl.textContent =
-        'Bạn đã thắp sáng trọn vẹn Đảo Bến, Đảo Cau và Đảo Chuông trước ánh bình minh rạng rỡ.';
+        'Bạn đã giữ trọn ánh sáng qua Đảo Bến, Đảo Cau và Đảo Chuông cho tới khi bình minh ló rạng.';
     } else if (won) {
-      titleEl.textContent = `Qua Đêm ${sim.night}!`;
-      subEl.textContent = `Cả ${sim.lanterns.length} Đèn Lồng Lớn trên ${sim.map.name} đã rực sáng.`;
+      titleEl.textContent = `Sống Sót Qua Đêm ${sim.night}!`;
+      subEl.textContent = `Đã giữ đủ đèn sáng trên ${sim.map.name} tới bình minh.`;
     } else {
-      titleEl.textContent = 'Ngọn Đèn Đã Tắt';
+      titleEl.textContent = 'Đêm Chưa Qua Khỏi';
       subEl.textContent =
         reason === 'dawn'
-          ? 'Bình minh tới trước khi kịp thắp hết đèn lồng.'
+          ? 'Bình minh tới nhưng số đèn sáng chưa đạt ngưỡng yêu cầu.'
           : 'Mây đã mất hết ngọn lửa ấm áp.';
     }
 
     const b = sim.scoreBreakdown;
     brEl.innerHTML = `
-      <div class="breakdown-row"><span>Nạp đom đóm (+10)</span><span>+${b.deposits}</span></div>
-      <div class="breakdown-row"><span>Thắp đèn (+100)</span><span>+${b.lanterns}</span></div>
-      <div class="breakdown-row"><span>Tỏa Sáng (+5)</span><span>+${b.stuns}</span></div>
-      <div class="breakdown-row"><span>Giây còn lại</span><span>+${b.timeBonus}</span></div>
+      <div class="breakdown-row"><span>Nạp / châm dầu (+5)</span><span>+${b.deposits}</span></div>
+      <div class="breakdown-row"><span>Thắp mới (+100)</span><span>+${b.lanterns}</span></div>
+      <div class="breakdown-row"><span>Thắp lại (+40)</span><span>+${b.relights}</span></div>
+      <div class="breakdown-row"><span>Tỏa Sáng (+5 / +15 đang hút)</span><span>+${b.stuns}</span></div>
+      <div class="breakdown-row"><span>Đèn sáng lúc Bình minh</span><span>+${b.lanternDawnBonus}</span></div>
       <div class="breakdown-row"><span>Ngọn lửa còn lại</span><span>+${b.flameBonus}</span></div>
       <div class="breakdown-row total"><span>Điểm Đêm ${sim.night}</span><span>${sim.score}</span></div>
       <div class="breakdown-row total"><span>Tổng điểm hành trình</span><span>${totalCampaignScore}</span></div>
@@ -452,48 +466,70 @@ export class GameHud {
       this.elCharmTag.style.display = 'none';
     }
 
-    // Timer mm:ss
+    // Timer mm:ss (warning prefix in colorblind mode or <= 30s)
     const totalSec = Math.ceil(sim.timeLeftS);
     const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
     const sec = String(totalSec % 60).padStart(2, '0');
-    this.elTimer.textContent = `${min}:${sec}`;
-    this.elTimer.classList.toggle('danger', totalSec <= 30 && sim.state === 'playing');
+    const isDangerTime = totalSec <= 30 && sim.state === 'playing';
+    this.elTimer.textContent = isDangerTime && this.settings.colorblindMode ? `⚠ ${min}:${sec}` : `${min}:${sec}`;
+    this.elTimer.classList.toggle('danger', isDangerTime);
 
-    // Lanterns + off-screen nearest unlit lantern arrow
+    // Lanterns + interact target + low-fuel warnings
     let litCount = 0;
     let lanternsHtml = '';
-    let nearUnlit = null;
+    let nearTarget = null;
     let nearDist = Infinity;
-    let closestAnyUnlit = null;
-    let closestAnyDist = Infinity;
+    let closestPriorityLantern = null;
+    let closestPriorityDist = Infinity;
+    const lowFuelIds = [];
 
     for (const l of sim.lanterns) {
+      const d = distXZ(sim.player.pos, l.pos);
       if (l.lit) {
         litCount += 1;
+        if (l.fuel60 < LOW_FUEL_60) lowFuelIds.push(l.id);
+        if (l.fuel60 < 6000 && d <= sim.tuning.interact_radius && d < nearDist) {
+          nearDist = d;
+          nearTarget = l;
+        }
+        if (l.fuel60 < LOW_FUEL_60 && d < closestPriorityDist) {
+          closestPriorityDist = d;
+          closestPriorityLantern = l;
+        }
       } else {
-        const d = distXZ(sim.player.pos, l.pos);
         if (d <= sim.tuning.interact_radius && d < nearDist) {
           nearDist = d;
-          nearUnlit = l;
+          nearTarget = l;
         }
-        if (d < closestAnyDist) {
-          closestAnyDist = d;
-          closestAnyUnlit = l;
+        if (d < closestPriorityDist) {
+          closestPriorityDist = d;
+          closestPriorityLantern = l;
         }
       }
       lanternsHtml += `<span class="lantern-svg ${l.lit ? 'lit' : ''}">${SVG_LANTERN}</span>`;
     }
+
+    const reqLit = Math.ceil(sim.tuning.win_ratio * sim.lanterns.length - 1e-9);
+    this.elLanternGoal.textContent = `Đèn (cần ≥${reqLit})`;
     this.elLanterns.innerHTML = lanternsHtml;
     this.elLanternCount.textContent = `${litCount}/${sim.lanterns.length}`;
     this.elScore.textContent = String(sim.score);
 
-    // 10-slot mote bar
+    if (lowFuelIds.length > 0 && sim.state === 'playing') {
+      this.elLowFuelBanner.style.display = 'inline-block';
+      this.elLowFuelBanner.textContent = `⚠ Sắp cạn dầu: ${lowFuelIds.join(', ')}`;
+    } else {
+      this.elLowFuelBanner.style.display = 'none';
+    }
+
+    // Dynamic capacity mote bar (10..20 slots)
+    const carryCap = sim.getCarryCapacity();
     let motesHtml = '';
-    for (let i = 0; i < sim.tuning.carry_capacity; i += 1) {
+    for (let i = 0; i < carryCap; i += 1) {
       motesHtml += `<span class="mote-pip ${i < sim.player.carried ? 'filled' : ''}"></span>`;
     }
     this.elMotes.innerHTML = motesHtml;
-    this.elMoteCount.textContent = `${sim.player.carried}/${sim.tuning.carry_capacity}`;
+    this.elMoteCount.textContent = `${sim.player.carried}/${carryCap}`;
 
     // Dash & Pulse cooldown cards
     if (sim.player.charmTicks > 0) {
@@ -518,8 +554,16 @@ export class GameHud {
       this.elPulseState.textContent = 'Sẵn sàng';
     }
 
-    if (nearUnlit && sim.state === 'playing') {
-      this.elPrompt.textContent = `E — Nạp ánh sáng (${nearUnlit.deposited}/${sim.tuning.lantern_cost})`;
+    if (nearTarget && sim.state === 'playing') {
+      if (!nearTarget.lit) {
+        const cost = sim.getLanternCost(nearTarget);
+        const tag = nearTarget.everLit ? ' (Thắp lại)' : '';
+        this.elPrompt.textContent = `E — Nạp ánh sáng (${nearTarget.deposited}/${cost})${tag}`;
+      } else {
+        const fuelInt = Math.round(nearTarget.fuel60 / FUEL_SCALE);
+        const warn = nearTarget.fuel60 < LOW_FUEL_60 ? ' ⚠' : '';
+        this.elPrompt.textContent = `E — Châm dầu ${nearTarget.id} (${fuelInt}/100)${warn}`;
+      }
       this.elPrompt.classList.add('visible');
     } else {
       this.elPrompt.classList.remove('visible');
@@ -527,7 +571,7 @@ export class GameHud {
 
     if (sim.windEnabled && sim.wind.warning) {
       this.elWindBanner.style.display = 'inline-block';
-      this.elWindBanner.textContent = 'Gió mạnh sắp thổi — bám chắc mặt đất!';
+      this.elWindBanner.textContent = '⚠ Gió mạnh sắp thổi — bám chắc mặt đất!';
     } else if (sim.windEnabled && sim.wind.active) {
       this.elWindBanner.style.display = 'inline-block';
       this.elWindBanner.textContent = `Gió mạnh đang thổi (${Math.round(sim.wind.dirDeg)}°)`;
@@ -535,8 +579,8 @@ export class GameHud {
       this.elWindBanner.style.display = 'none';
     }
 
-    if (closestAnyUnlit && sim.state === 'playing') {
-      const proj = renderer.projectToScreen(closestAnyUnlit.pos);
+    if (closestPriorityLantern && sim.state === 'playing') {
+      const proj = renderer.projectToScreen(closestPriorityLantern.pos);
       if (!proj.onScreen) {
         const margin = 48;
         const cx = proj.w / 2;

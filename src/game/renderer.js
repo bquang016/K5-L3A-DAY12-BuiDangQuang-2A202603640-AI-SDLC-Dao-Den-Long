@@ -1,5 +1,11 @@
 import * as THREE from 'three';
-import { DEFAULT_TUNING, PALETTE } from '../sim/config.js';
+import {
+  COLORBLIND_PALETTE,
+  DEFAULT_TUNING,
+  FUEL_MAX_60,
+  LOW_FUEL_60,
+  PALETTE
+} from '../sim/config.js';
 import { getMapConfig, getSurfaceHeight } from '../sim/maps.js';
 import { distXZ } from '../sim/math.js';
 import {
@@ -79,6 +85,7 @@ export class IslandRenderer {
     this.grassTufts = null;
     this.grassMeta = [];
     this.bellMesh = null;
+    this.colorblindMode = false;
 
     this._camPos = new THREE.Vector3(0, 8, -12);
     this._camTarget = new THREE.Vector3(0, 1.4, 0);
@@ -303,6 +310,7 @@ export class IslandRenderer {
     this.grassTufts = null;
     this.grassMeta = [];
     this.bellMesh = null;
+    this.colorblindMode = false;
 
     for (const view of this.moteMeshes.values()) this.scene.remove(view.group);
     this.moteMeshes.clear();
@@ -626,15 +634,50 @@ export class IslandRenderer {
         emissiveIntensity: 0.05,
         roughness: 0.42
       });
+      const bodyGroup = new THREE.Group();
+      bodyGroup.position.y = 2.5;
       const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.42, 1.0, 8), coreMat);
-      body.position.y = 3.0;
+      body.position.y = 0.5;
       body.castShadow = true;
-      group.add(body);
+      bodyGroup.add(body);
+
+      // Tear marks for colorblind-friendly unlit distinction
+      const tearMat = new THREE.MeshBasicMaterial({ color: '#1b1d28' });
+      const tears = [];
+      for (let t = 0; t < 3; t += 1) {
+        const ang = (t / 3) * Math.PI * 2;
+        const tear = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.55, 0.04), tearMat);
+        tear.position.set(Math.sin(ang) * 0.47, 0.5, Math.cos(ang) * 0.47);
+        tear.rotation.y = ang;
+        tear.rotation.z = 0.35;
+        bodyGroup.add(tear);
+        tears.push(tear);
+      }
+      group.add(bodyGroup);
 
       const roof = new THREE.Mesh(new THREE.ConeGeometry(0.88, 0.58, 8), roofMat);
       roof.position.y = 3.74;
       roof.castShadow = true;
       group.add(roof);
+
+      // Overhead fuel gauge bar
+      const fuelBarGroup = new THREE.Group();
+      fuelBarGroup.position.y = 4.45;
+      fuelBarGroup.visible = false;
+      const fuelBg = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.44, 0.2),
+        new THREE.MeshBasicMaterial({ color: '#0e1430', side: THREE.DoubleSide })
+      );
+      const fuelFillMat = new THREE.MeshBasicMaterial({
+        color: PALETTE.goldAccent,
+        transparent: true,
+        opacity: 1,
+        side: THREE.DoubleSide
+      });
+      const fuelFill = new THREE.Mesh(new THREE.PlaneGeometry(1.36, 0.13), fuelFillMat);
+      fuelFill.position.z = 0.01;
+      fuelBarGroup.add(fuelBg, fuelFill);
+      group.add(fuelBarGroup);
 
       const light = new THREE.PointLight(PALETTE.lanternLit, 0, 22, 1.35);
       light.position.y = 3.0;
@@ -683,13 +726,27 @@ export class IslandRenderer {
       this.worldGroup.add(group);
       this.lanternViews.set(l.id, {
         group,
+        bodyGroup,
+        tears,
         coreMat,
         light,
         haloMat,
         safeRingMat,
         progressRing,
+        fuelBarGroup,
+        fuelFill,
+        fuelFillMat,
         wasLit: false
       });
+    }
+  }
+
+  setColorblindMode(enabled) {
+    this.colorblindMode = Boolean(enabled);
+    const rimHex = this.colorblindMode ? COLORBLIND_PALETTE.shadeRim : PALETTE.shadeRim;
+    for (const view of this.shadeViews.values()) {
+      view.bodyMat.emissive.set(rimHex);
+      view.eyeMat.color.set(rimHex);
     }
   }
 
@@ -804,10 +861,11 @@ export class IslandRenderer {
       const s = shades[i];
       let view = this.shadeViews.get(s.id);
       if (!view) {
+        const rimHex = this.colorblindMode ? COLORBLIND_PALETTE.shadeRim : PALETTE.shadeRim;
         const group = new THREE.Group();
         const bodyMat = new THREE.MeshStandardMaterial({
           color: PALETTE.shadeBody,
-          emissive: PALETTE.shadeRim,
+          emissive: rimHex,
           emissiveIntensity: 0.75,
           roughness: 0.55
         });
@@ -816,7 +874,7 @@ export class IslandRenderer {
         body.castShadow = true;
         group.add(body);
 
-        const eyeMat = new THREE.MeshBasicMaterial({ color: PALETTE.shadeRim });
+        const eyeMat = new THREE.MeshBasicMaterial({ color: rimHex });
         const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
         leftEye.position.set(-0.15, 1.15, 0.34);
         const rightEye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
@@ -847,12 +905,19 @@ export class IslandRenderer {
       } else if (s.state === 'stunned') {
         view.group.scale.set(0.9, 0.75, 0.9);
         view.bodyMat.color.set(PALETTE.shadeStunned);
+        view.bodyMat.emissiveIntensity = 0.45;
         view.stunRing.visible = true;
         view.stunRing.rotation.z = this.elapsed * 5;
         view.group.rotation.y += 0.12;
+      } else if (s.state === 'drain') {
+        view.group.scale.set(1.05, 1.08, 1.05);
+        view.bodyMat.color.set(PALETTE.shadeBody);
+        view.bodyMat.emissiveIntensity = 1.15 + Math.sin(this.elapsed * 8) * 0.3;
+        view.stunRing.visible = false;
       } else {
         view.group.scale.set(1, 1, 1);
         view.bodyMat.color.set(PALETTE.shadeBody);
+        view.bodyMat.emissiveIntensity = 0.75;
         view.stunRing.visible = false;
         view.group.rotation.y = Math.atan2(
           this.playerGroup.position.x - s.pos[0],
@@ -1016,18 +1081,43 @@ export class IslandRenderer {
       this.playerGroup.visible = true;
     }
 
-    // Lanterns sync
+    // Lanterns sync (fuel bars, 1Hz low-fuel blink, unlit squash + tears)
     let litCount = 0;
+    const blinkOn = Math.sin(this.elapsed * Math.PI * 2) >= 0;
+    const dangerHex = this.colorblindMode ? COLORBLIND_PALETTE.uiDanger : PALETTE.uiDanger;
+
     for (const l of sim.lanterns) {
       const view = this.lanternViews.get(l.id);
       if (!view) continue;
+      view.fuelBarGroup.quaternion.copy(this.camera.quaternion);
+
       if (l.lit) {
         litCount += 1;
+        view.bodyGroup.scale.set(1, 1, 1);
+        for (const tear of view.tears) tear.visible = false;
+
+        const fuelFrac = Math.max(0, Math.min(1, l.fuel60 / FUEL_MAX_60));
+        const isLowFuel = l.fuel60 < LOW_FUEL_60;
+        view.fuelBarGroup.visible = true;
+        view.fuelFill.scale.x = Math.max(0.01, fuelFrac);
+        view.fuelFill.position.x = -0.68 + 0.68 * fuelFrac;
+
         view.coreMat.color.set(PALETTE.lanternCore);
-        view.coreMat.emissiveIntensity = 1.85;
-        view.light.intensity = 4.8;
-        view.haloMat.opacity = 0.65 + Math.sin(this.elapsed * 3.1) * 0.1;
-        view.safeRingMat.opacity = 0.28 + Math.sin(this.elapsed * 2.5) * 0.06;
+        if (isLowFuel) {
+          view.coreMat.emissiveIntensity = blinkOn ? 1.6 : 0.3;
+          view.light.intensity = blinkOn ? 4.2 : 0.9;
+          view.haloMat.opacity = blinkOn ? 0.55 : 0.1;
+          view.fuelFillMat.color.set(dangerHex);
+          view.fuelFillMat.opacity = blinkOn ? 1.0 : 0.3;
+          view.safeRingMat.opacity = 0; // Fuel < 30 loses safe zone
+        } else {
+          view.coreMat.emissiveIntensity = 1.85;
+          view.light.intensity = 4.8;
+          view.haloMat.opacity = 0.65 + Math.sin(this.elapsed * 3.1) * 0.1;
+          view.fuelFillMat.color.set(PALETTE.goldAccent);
+          view.fuelFillMat.opacity = 1.0;
+          view.safeRingMat.opacity = 0.28 + Math.sin(this.elapsed * 2.5) * 0.06;
+        }
         view.progressRing.scale.setScalar(0.01);
         if (!view.wasLit) {
           view.wasLit = true;
@@ -1035,7 +1125,12 @@ export class IslandRenderer {
         }
       } else {
         view.wasLit = false;
-        const frac = l.deposited / sim.tuning.lantern_cost;
+        view.bodyGroup.scale.set(1.06, 0.8, 1.06); // Squashed 20% when unlit
+        for (const tear of view.tears) tear.visible = true;
+        view.fuelBarGroup.visible = false;
+
+        const cost = sim.getLanternCost(l);
+        const frac = cost > 0 ? l.deposited / cost : 0;
         view.coreMat.color.set(PALETTE.lanternUnlit);
         view.coreMat.emissiveIntensity = 0.08 + frac * 0.7;
         view.light.intensity = frac * 1.4;
@@ -1098,27 +1193,40 @@ export class IslandRenderer {
       }
     }
 
-    // Guiding Wisp (creative addition)
-    let nearestUnlit = null;
-    if (sim.player.carried >= sim.tuning.lantern_cost) {
-      let bestDist = Infinity;
+    // Guiding Wisp (prioritize weak lit lanterns when carrying motes, else unlit lantern when ready)
+    let guideTarget = null;
+    if (sim.player.carried > 0) {
+      let bestWeakDist = Infinity;
       for (const l of sim.lanterns) {
-        if (l.lit) continue;
+        if (!l.lit || l.fuel60 >= LOW_FUEL_60) continue;
         const d = distXZ(sim.player.pos, l.pos);
-        if (d < bestDist) {
-          bestDist = d;
-          nearestUnlit = l;
+        if (d < bestWeakDist) {
+          bestWeakDist = d;
+          guideTarget = l;
+        }
+      }
+      if (!guideTarget) {
+        let bestUnlitDist = Infinity;
+        for (const l of sim.lanterns) {
+          if (l.lit) continue;
+          const needed = sim.getLanternCost(l) - l.deposited;
+          if (sim.player.carried < needed) continue;
+          const d = distXZ(sim.player.pos, l.pos);
+          if (d < bestUnlitDist) {
+            bestUnlitDist = d;
+            guideTarget = l;
+          }
         }
       }
     }
     for (const w of this.wispSparks) {
-      if (!nearestUnlit) {
+      if (!guideTarget) {
         w.mat.opacity = 0;
         continue;
       }
       const u = (this.elapsed * 0.75 + w.phase) % 1;
-      const dx = nearestUnlit.pos[0] - p[0];
-      const dz = nearestUnlit.pos[2] - p[2];
+      const dx = guideTarget.pos[0] - p[0];
+      const dz = guideTarget.pos[2] - p[2];
       const d = Math.max(0.1, Math.hypot(dx, dz));
       const span = Math.min(7.5, d);
       w.mesh.position.set(

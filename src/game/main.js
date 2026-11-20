@@ -15,13 +15,14 @@ function loadSettings() {
       return {
         volume: Number.isFinite(parsed.volume) ? parsed.volume : 0.75,
         mouseSensitivity: Number.isFinite(parsed.mouseSensitivity) ? parsed.mouseSensitivity : 1.0,
-        pointerLockEnabled: typeof parsed.pointerLockEnabled === 'boolean' ? parsed.pointerLockEnabled : true
+        pointerLockEnabled: typeof parsed.pointerLockEnabled === 'boolean' ? parsed.pointerLockEnabled : true,
+        colorblindMode: typeof parsed.colorblindMode === 'boolean' ? parsed.colorblindMode : false
       };
     }
   } catch {
     // ignore storage errors
   }
-  return { volume: 0.75, mouseSensitivity: 1.0, pointerLockEnabled: true };
+  return { volume: 0.75, mouseSensitivity: 1.0, pointerLockEnabled: true, colorblindMode: false };
 }
 
 function saveSettings(settings) {
@@ -38,6 +39,7 @@ const hudEl = document.getElementById('hud');
 const settings = loadSettings();
 const sound = new SoundEngine({ volume: settings.volume });
 const renderer = new IslandRenderer(appEl);
+renderer.setColorblindMode(settings.colorblindMode);
 
 let currentNight = 1;
 let runSeed = 2026;
@@ -115,9 +117,11 @@ const hud = new GameHud(hudEl, {
     settings.volume = next.volume;
     settings.mouseSensitivity = next.mouseSensitivity;
     settings.pointerLockEnabled = next.pointerLockEnabled;
+    settings.colorblindMode = next.colorblindMode;
     sound.setVolume(settings.volume);
     input.setMouseSensitivity(settings.mouseSensitivity);
     input.setPointerLockEnabled(settings.pointerLockEnabled);
+    renderer.setColorblindMode(settings.colorblindMode);
     hud.syncSettingsUi(settings);
     saveSettings(settings);
   }
@@ -162,7 +166,16 @@ function handleSimEvents(events) {
     } else if (ev.name === 'lantern_lit') {
       const litCount = sim.lanterns.filter((l) => l.lit).length;
       sound.playLanternLit(litCount);
-      hud.showWhisper(`Đã thắp ${ev.data.lantern_id} (${litCount}/${sim.lanterns.length})!`);
+      hud.showWhisper(
+        ev.data.relight
+          ? `Đã thắp lại ${ev.data.lantern_id}! Sức chứa tăng lên ${sim.getCarryCapacity()}!`
+          : `Đã thắp ${ev.data.lantern_id} (${litCount}/${sim.lanterns.length})! Sức chứa: ${sim.getCarryCapacity()}`
+      );
+    } else if (ev.name === 'refuel') {
+      sound.playDeposit();
+      hud.showWhisper(`Đã châm dầu ${ev.data.lantern_id} → ${ev.data.fuel}%`);
+    } else if (ev.name === 'lantern_out') {
+      hud.showWhisper(`⚠ Đèn ${ev.data.lantern_id} đã tắt! Thắp lại chỉ cần 5 đom đóm.`);
     } else if (ev.name === 'pulse') {
       sound.playPulse();
       renderer.triggerPulseFx(sim.player.pos);
