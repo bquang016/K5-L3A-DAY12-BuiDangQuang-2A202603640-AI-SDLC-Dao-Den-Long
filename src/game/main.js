@@ -303,7 +303,8 @@ function startNormalGame() {
         hud.showWhisper(`Gió Lạc ${ev.data.drifter_id} vừa cướp ${ev.data.amount} đom đóm! Dùng Tỏa Sáng để lấy lại!`);
       } else if (ev.name === 'shade_spawned') {
         sound.playShadeSpawn();
-        hud.showShadeSpawnAlert(ev.data.id, ev.data.pos);
+        const spawnedShade = sim.shades.find((s) => s.id === ev.data.id);
+        hud.showShadeSpawnAlert(ev.data.id, spawnedShade?.pos ?? null);
       } else if (ev.name === 'player_hit') {
         sound.playHit();
         renderer.triggerShake(0.55);

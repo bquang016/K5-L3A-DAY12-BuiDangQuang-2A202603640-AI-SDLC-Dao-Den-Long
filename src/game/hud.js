@@ -596,9 +596,10 @@ export class GameHud {
   }
 
   showShadeSpawnAlert(shadeId, pos) {
+    const safePos = Array.isArray(pos) && pos.length >= 3 ? [pos[0], pos[1], pos[2]] : null;
     this.shadeAlert = {
       id: shadeId,
-      pos: [pos[0], pos[1], pos[2]],
+      pos: safePos,
       timer: 4.5
     };
   }
@@ -812,9 +813,13 @@ export class GameHud {
         const shadePos = liveShade ? liveShade.pos : this.shadeAlert.pos;
         this.elShadeCaption.style.display = 'inline-block';
         this.elShadeCaption.textContent = `⚠ Bóng Mực ${this.shadeAlert.id} vừa xuất hiện!`;
-        const projShade = renderer.projectToScreen(shadePos, 1.2);
-        if (!projShade.onScreen) {
-          positionEdgeArrow(this.elShadeArrow, projShade);
+        if (shadePos) {
+          const projShade = renderer.projectToScreen(shadePos, 1.2);
+          if (!projShade.onScreen) {
+            positionEdgeArrow(this.elShadeArrow, projShade);
+          } else {
+            this.elShadeArrow.style.display = 'none';
+          }
         } else {
           this.elShadeArrow.style.display = 'none';
         }
