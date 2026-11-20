@@ -1,18 +1,28 @@
 /**
- * Captures keyboard & pointer orbit controls and samples edge-latched 60Hz input
- * aligned with Test Contract v1.0 movement yaw coordinates.
+ * Keyboard & pointer controls aligned with TICKET-02:
+ * - WASD / Arrows: Move
+ * - Space: Jump
+ * - Shift: Dash
+ * - E (or F/Enter): Interact / Deposit into lantern
+ * - Q (or X): Radiant Pulse
+ * - Esc / P: Pause toggle
+ * - M: Mute toggle
+ * - Mouse drag (or [ / ]): Orbit camera yaw
  */
 export class InputController {
-  constructor(domElement, { onMuteToggle } = {}) {
+  constructor(domElement, { onMuteToggle, onPauseToggle, mouseSensitivity = 1.0 } = {}) {
     this.domElement = domElement;
     this.onMuteToggle = onMuteToggle;
+    this.onPauseToggle = onPauseToggle;
+    this.mouseSensitivity = mouseSensitivity;
 
     this.keys = new Set();
     this.pendingJump = false;
     this.pendingInteract = false;
     this.pendingPulse = false;
+    this.pendingDash = false;
 
-    this.camYawDeg = 0;
+    this.camYawDeg = 180; // Look along +Z initially (matches Mây facing +Z)
     this.isDragging = false;
     this.lastPointerX = 0;
 
@@ -31,15 +41,31 @@ export class InputController {
     window.addEventListener('pointerup', this._onPointerUp);
   }
 
+  setMouseSensitivity(val) {
+    this.mouseSensitivity = val;
+  }
+
+  resetCameraForNight() {
+    this.camYawDeg = 180;
+  }
+
   _handleKeyDown(e) {
     if (e.code === 'Space' || e.code.startsWith('Arrow')) {
       e.preventDefault();
     }
     if (!e.repeat) {
       if (e.code === 'Space') this.pendingJump = true;
-      if (e.code === 'KeyF' || e.code === 'Enter') this.pendingInteract = true;
-      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyX') {
+      if (e.code === 'KeyE' || e.code === 'KeyF' || e.code === 'Enter') {
+        this.pendingInteract = true;
+      }
+      if (e.code === 'KeyQ' || e.code === 'KeyX') {
         this.pendingPulse = true;
+      }
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        this.pendingDash = true;
+      }
+      if ((e.code === 'Escape' || e.code === 'KeyP') && this.onPauseToggle) {
+        this.onPauseToggle();
       }
       if (e.code === 'KeyM' && this.onMuteToggle) {
         this.onMuteToggle();
@@ -61,7 +87,7 @@ export class InputController {
     if (!this.isDragging) return;
     const dx = e.clientX - this.lastPointerX;
     this.lastPointerX = e.clientX;
-    this.camYawDeg -= dx * 0.35;
+    this.camYawDeg -= dx * 0.32 * this.mouseSensitivity;
   }
 
   _handlePointerUp() {
@@ -74,8 +100,8 @@ export class InputController {
   }
 
   sampleTickInput(dt) {
-    if (this.keys.has('KeyQ')) this.camYawDeg += 95 * dt;
-    if (this.keys.has('KeyE')) this.camYawDeg -= 95 * dt;
+    if (this.keys.has('BracketLeft')) this.camYawDeg += 95 * dt;
+    if (this.keys.has('BracketRight')) this.camYawDeg -= 95 * dt;
 
     let x = 0;
     let z = 0;
@@ -85,21 +111,23 @@ export class InputController {
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) z += 1;
 
     const heldJump = this.keys.has('Space');
-    const heldInteract = this.keys.has('KeyF') || this.keys.has('Enter');
-    const heldPulse =
-      this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.keys.has('KeyX');
+    const heldInteract = this.keys.has('KeyE') || this.keys.has('KeyF') || this.keys.has('Enter');
+    const heldPulse = this.keys.has('KeyQ') || this.keys.has('KeyX');
+    const heldDash = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
 
     const input = {
       move: [x, z],
       cam_yaw_deg: this.camYawDeg,
       jump: heldJump || this.pendingJump,
       interact: heldInteract || this.pendingInteract,
-      pulse: heldPulse || this.pendingPulse
+      pulse: heldPulse || this.pendingPulse,
+      dash: heldDash || this.pendingDash
     };
 
     this.pendingJump = false;
     this.pendingInteract = false;
     this.pendingPulse = false;
+    this.pendingDash = false;
 
     return input;
   }
