@@ -54,8 +54,8 @@ function main() {
 
   const seed = parseIntStrict(args.seed, 'seed');
   const night = parseIntStrict(args.night, 'night');
-  if (night !== 1) {
-    fail(`Unsupported --night ${night}. Phase 1 supports --night 1 only.`, 1);
+  if (![1, 2, 3].includes(night)) {
+    fail(`Unsupported --night ${night}. Supported nights are 1, 2, 3.`, 1);
   }
 
   const ticks = parseIntStrict(args.ticks, 'ticks');
@@ -78,7 +78,7 @@ function main() {
   if (args.scenario !== undefined) {
     scenario = loadJsonFile(args.scenario, 'scenario');
     try {
-      validateScenario(scenario);
+      validateScenario(scenario, night);
     } catch (err) {
       if (err instanceof ValidationError) {
         fail(`Invalid scenario schema: ${err.message}`, 2);
@@ -102,7 +102,10 @@ function main() {
   }
 
   const sim = new LanternIslandSim({ seed, night, scenario });
-  const lines = [JSON.stringify(sim.getSnapshot())];
+  const lines = [
+    JSON.stringify(sim.getSnapshot()),
+    JSON.stringify({ type: 'event', tick: 0, name: 'night_start', data: { night } })
+  ];
 
   const currentInput = {
     move: [0, 0],
@@ -110,12 +113,13 @@ function main() {
     jump: false,
     interact: false,
     pulse: false,
-    dash: false
+    dash: false,
+    pause: false
   };
   let frameIdx = 0;
 
   for (let k = 0; k < ticks; k += 1) {
-    if (sim.state !== 'playing') break;
+    if (sim.state === 'won' || sim.state === 'lost') break;
 
     if (frameIdx < frames.length && frames[frameIdx].tick === k) {
       const f = frames[frameIdx];
@@ -125,6 +129,7 @@ function main() {
       if (f.interact !== undefined) currentInput.interact = f.interact;
       if (f.pulse !== undefined) currentInput.pulse = f.pulse;
       if (f.dash !== undefined) currentInput.dash = f.dash;
+      if (f.pause !== undefined) currentInput.pause = f.pause;
       frameIdx += 1;
     }
 
@@ -137,7 +142,7 @@ function main() {
       lines.push(JSON.stringify(sim.getSnapshot()));
     }
 
-    if (sim.state !== 'playing') break;
+    if (sim.state === 'won' || sim.state === 'lost') break;
   }
 
   lines.push(JSON.stringify(sim.getEndRecord()));

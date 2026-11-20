@@ -1,0 +1,9 @@
+{
+  "description": "Scenario 07: Air dash maintains altitude, moves 2.8m in 12 ticks, and enforces 1.5s cooldown",
+  "player": { "pos": [0, 0, 0], "carried": 0, "flames": 3 },
+  "random_motes": false,
+  "random_shades": false,
+  "motes": [],
+  "shades": [],
+  "time_left_s": 300
+}

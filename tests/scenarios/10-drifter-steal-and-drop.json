@@ -1,0 +1,11 @@
+{
+  "description": "Scenario 10: Drifter steals up to 3 motes when carried >= 5, then Pulse forces drifter_drop",
+  "player": { "pos": [0, 0, 0], "carried": 6, "flames": 3 },
+  "random_motes": false,
+  "random_shades": false,
+  "random_drifters": false,
+  "motes": [],
+  "shades": [],
+  "drifters": [{ "id": "D1", "pos": [3, 1.5, 0], "state": "idle" }],
+  "time_left_s": 330
+}

@@ -1,5 +1,8 @@
-const VALID_LANTERN_IDS = new Set(['L1', 'L2', 'L3', 'L4', 'L5']);
-const BUTTON_FIELDS = ['jump', 'interact', 'pulse', 'dash'];
+const LANTERN_COUNT_BY_NIGHT = { 1: 5, 2: 6, 3: 7 };
+const BUTTON_FIELDS = ['jump', 'interact', 'pulse', 'dash', 'pause'];
+const SHADE_STATES = new Set(['spawning', 'wander', 'chase', 'recoil', 'stunned']);
+const DRIFTER_STATES = new Set(['idle', 'chase', 'flee', 'removed']);
+const MOTE_KINDS = new Set(['random', 'dropped']);
 
 export class ValidationError extends Error {
   constructor(message) {
@@ -69,9 +72,15 @@ export function validateInputs(data) {
   }
 }
 
-export function validateScenario(data) {
+export function validateScenario(data, night = 1) {
   if (!isPlainObject(data)) {
     throw new ValidationError('Scenario root must be a JSON object.');
+  }
+
+  const maxLanterns = LANTERN_COUNT_BY_NIGHT[night] || 5;
+  const validLanternIds = new Set();
+  for (let i = 1; i <= maxLanterns; i += 1) {
+    validLanternIds.add(`L${i}`);
   }
 
   if (data.player !== undefined) {
@@ -81,19 +90,24 @@ export function validateScenario(data) {
     if (data.player.pos !== undefined && !isVec3(data.player.pos)) {
       throw new ValidationError('scenario.player.pos must be [x, y, z] of finite numbers.');
     }
-    if (data.player.carried !== undefined && !isNonNegInt(data.player.carried)) {
-      throw new ValidationError('scenario.player.carried must be a non-negative integer.');
-    }
-    if (data.player.flames !== undefined && !isNonNegInt(data.player.flames)) {
-      throw new ValidationError('scenario.player.flames must be a non-negative integer.');
+    for (const intField of [
+      'carried',
+      'flames',
+      'invuln_ticks',
+      'dash_cd_ticks',
+      'pulse_cd_ticks',
+      'charm_ticks'
+    ]) {
+      if (data.player[intField] !== undefined && !isNonNegInt(data.player[intField])) {
+        throw new ValidationError(`scenario.player.${intField} must be a non-negative integer.`);
+      }
     }
   }
 
-  if (data.random_motes !== undefined && typeof data.random_motes !== 'boolean') {
-    throw new ValidationError('scenario.random_motes must be a boolean.');
-  }
-  if (data.random_shades !== undefined && typeof data.random_shades !== 'boolean') {
-    throw new ValidationError('scenario.random_shades must be a boolean.');
+  for (const boolField of ['random_motes', 'random_shades', 'random_drifters', 'wind_enabled']) {
+    if (data[boolField] !== undefined && typeof data[boolField] !== 'boolean') {
+      throw new ValidationError(`scenario.${boolField} must be a boolean.`);
+    }
   }
 
   if (data.motes !== undefined) {
@@ -107,9 +121,18 @@ export function validateScenario(data) {
         if (m.id !== undefined && (typeof m.id !== 'string' || m.id.length === 0)) {
           throw new ValidationError(`scenario.motes[${i}].id must be a non-empty string.`);
         }
+        if (m.kind !== undefined && !MOTE_KINDS.has(m.kind)) {
+          throw new ValidationError(`scenario.motes[${i}].kind must be "random" or "dropped".`);
+        }
+        if (m.ttl_s !== undefined && (!isFiniteNumber(m.ttl_s) || m.ttl_s < 0)) {
+          throw new ValidationError(`scenario.motes[${i}].ttl_s must be a non-negative number.`);
+        }
+        if (m.ttl_ticks !== undefined && !isNonNegInt(m.ttl_ticks)) {
+          throw new ValidationError(`scenario.motes[${i}].ttl_ticks must be a non-negative integer.`);
+        }
         continue;
       }
-      throw new ValidationError(`scenario.motes[${i}] must be [x,y,z] or {id?, pos:[x,y,z]}.`);
+      throw new ValidationError(`scenario.motes[${i}] must be [x,y,z] or {id?, pos:[x,y,z], ...}.`);
     }
   }
 
@@ -120,10 +143,64 @@ export function validateScenario(data) {
     for (let i = 0; i < data.shades.length; i += 1) {
       const s = data.shades[i];
       if (!isPlainObject(s) || !isVec3(s.pos)) {
-        throw new ValidationError(`scenario.shades[${i}] must be {id?, pos:[x,y,z]}.`);
+        throw new ValidationError(`scenario.shades[${i}] must be {id?, pos:[x,y,z], ...}.`);
       }
       if (s.id !== undefined && (typeof s.id !== 'string' || s.id.length === 0)) {
         throw new ValidationError(`scenario.shades[${i}].id must be a non-empty string.`);
+      }
+      if (s.state !== undefined && !SHADE_STATES.has(s.state)) {
+        throw new ValidationError(`scenario.shades[${i}].state is invalid (${s.state}).`);
+      }
+      if (s.state_ticks_left !== undefined && !isNonNegInt(s.state_ticks_left)) {
+        throw new ValidationError(`scenario.shades[${i}].state_ticks_left must be a non-negative integer.`);
+      }
+    }
+  }
+
+  if (data.drifters !== undefined) {
+    if (!Array.isArray(data.drifters)) {
+      throw new ValidationError('scenario.drifters must be an array.');
+    }
+    for (let i = 0; i < data.drifters.length; i += 1) {
+      const d = data.drifters[i];
+      if (!isPlainObject(d) || !isVec3(d.pos)) {
+        throw new ValidationError(`scenario.drifters[${i}] must be {id?, pos:[x,y,z], ...}.`);
+      }
+      if (d.id !== undefined && (typeof d.id !== 'string' || d.id.length === 0)) {
+        throw new ValidationError(`scenario.drifters[${i}].id must be a non-empty string.`);
+      }
+      if (d.state !== undefined && !DRIFTER_STATES.has(d.state)) {
+        throw new ValidationError(`scenario.drifters[${i}].state is invalid (${d.state}).`);
+      }
+      if (d.stolen !== undefined && !isNonNegInt(d.stolen)) {
+        throw new ValidationError(`scenario.drifters[${i}].stolen must be a non-negative integer.`);
+      }
+      if (d.state_ticks_left !== undefined && !isNonNegInt(d.state_ticks_left)) {
+        throw new ValidationError(`scenario.drifters[${i}].state_ticks_left must be a non-negative integer.`);
+      }
+    }
+  }
+
+  if (data.charms !== undefined) {
+    if (!Array.isArray(data.charms)) {
+      throw new ValidationError('scenario.charms must be an array.');
+    }
+    for (let i = 0; i < data.charms.length; i += 1) {
+      const c = data.charms[i];
+      if (!isPlainObject(c)) {
+        throw new ValidationError(`scenario.charms[${i}] must be an object.`);
+      }
+      if (c.pos !== undefined && !isVec3(c.pos)) {
+        throw new ValidationError(`scenario.charms[${i}].pos must be [x,y,z].`);
+      }
+      if (c.available !== undefined && typeof c.available !== 'boolean') {
+        throw new ValidationError(`scenario.charms[${i}].available must be a boolean.`);
+      }
+      if (c.respawn_s !== undefined && (!isFiniteNumber(c.respawn_s) || c.respawn_s < 0)) {
+        throw new ValidationError(`scenario.charms[${i}].respawn_s must be a non-negative number.`);
+      }
+      if (c.respawn_ticks !== undefined && !isNonNegInt(c.respawn_ticks)) {
+        throw new ValidationError(`scenario.charms[${i}].respawn_ticks must be a non-negative integer.`);
       }
     }
   }
@@ -134,8 +211,10 @@ export function validateScenario(data) {
     }
     for (let i = 0; i < data.lanterns.length; i += 1) {
       const l = data.lanterns[i];
-      if (!isPlainObject(l) || typeof l.id !== 'string' || !VALID_LANTERN_IDS.has(l.id)) {
-        throw new ValidationError(`scenario.lanterns[${i}].id must be one of L1..L5.`);
+      if (!isPlainObject(l) || typeof l.id !== 'string' || !validLanternIds.has(l.id)) {
+        throw new ValidationError(
+          `scenario.lanterns[${i}].id must be one of L1..L${maxLanterns} for night ${night}.`
+        );
       }
       if (l.pos !== undefined && !isVec3(l.pos)) {
         throw new ValidationError(`scenario.lanterns[${i}].pos must be [x,y,z].`);

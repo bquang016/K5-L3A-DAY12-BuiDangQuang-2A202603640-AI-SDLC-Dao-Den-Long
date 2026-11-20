@@ -1,6 +1,6 @@
 {
-  "description": "Scenario 02: Deposit and light 5th lantern to trigger win and bonus score",
-  "player": { "pos": [0, 0, 20], "carried": 4, "flames": 3 },
+  "description": "Scenario 02 (v1.1): Deposit 10 motes to light L1, win with standardized bonus score",
+  "player": { "pos": [0, 0, 20], "carried": 10, "flames": 3 },
   "random_motes": false,
   "random_shades": false,
   "motes": [],

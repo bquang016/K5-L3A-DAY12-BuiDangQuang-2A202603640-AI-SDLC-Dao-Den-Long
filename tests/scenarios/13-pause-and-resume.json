@@ -1,0 +1,9 @@
+{
+  "description": "Scenario 13: Pause freezes sim_tick, timer, cooldowns, and dropped mote TTL while tick advances",
+  "player": { "pos": [0, 0, 0], "carried": 0, "flames": 3, "dash_cd_ticks": 90 },
+  "random_motes": false,
+  "random_shades": false,
+  "motes": [{ "id": "M1", "pos": [5, 0, 0], "kind": "dropped", "ttl_ticks": 100 }],
+  "shades": [],
+  "time_left_s": 300
+}
