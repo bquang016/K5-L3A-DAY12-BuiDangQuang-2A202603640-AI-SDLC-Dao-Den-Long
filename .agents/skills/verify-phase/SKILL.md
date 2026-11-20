@@ -1,6 +1,6 @@
 ---
 name: verify-phase
-description: Run full verification (contract sync, unit & headless contract tests, determinism check, Vite build) and capture real proof into docs/proof/phase-N.md before tagging.
+description: Run full verification (contract sync, unit & headless contract tests, determinism check across Nights 1-3, 21600-tick performance gate, Vite build) and capture real proof into docs/proof/phase-N.md before tagging.
 ---
 
 # Verify Phase Skill
@@ -14,22 +14,21 @@ Use this skill at the end of every phase (or after major simulation/contract edi
    npm run verify
    ```
    Confirm that:
-   - `game.contract.json` tuning matches `src/sim/config.js` (`DEFAULT_TUNING`).
-   - All `node --test` unit tests (`tests/unit.test.js`) pass.
-   - All headless contract scenario tests and error exit-code checks (`tests/contract.test.js`) pass.
-   - Seeded determinism check produces byte-identical JSONL output on repeated runs.
+   - `game.contract.json` (`contract_version: "1.1"`) tuning matches `src/sim/config.js` (`DEFAULT_TUNING`).
+   - All `node --test` unit tests (`tests/unit.test.js`) and headless contract tests (`tests/contract.test.js`) pass.
+   - Determinism check passes across `--night 1`, `--night 2`, and `--night 3` (byte-identical JSONL output).
+   - Full-night headless simulation (`--night 3 --ticks 21600`) completes well within the `<= 30s` budget.
    - `npm run build` succeeds cleanly.
 
-2. **Capture real headless evidence** (spot check):
+2. **Capture real headless spot checks**:
    ```bash
-   node src/headless/cli.js --seed 42 --night 1 --ticks 600 --out tmp/run1.jsonl
-   node src/headless/cli.js --seed 42 --night 1 --ticks 600 --out tmp/run2.jsonl
+   node src/headless/cli.js --seed 42 --night 3 --ticks 21600 --out tmp/night3-perf.jsonl
    ```
-   Verify `run1.jsonl` and `run2.jsonl` are byte-identical (and clean up `tmp/` afterwards).
+   Verify exit code `0` and runtime `<= 30s`, then remove `tmp/`.
 
 3. **Record real evidence in `docs/proof/phase-N.md`**:
-   - Include only exact observed commands, counts, exit codes, and JSONL snippets from the current commit.
-   - If any requirement is incomplete or failing, mark it `"chưa đạt"` honestly with the exact reason.
+   - Include only exact observed commands, counts, exit codes, timings, and JSONL snippets from the current commit.
+   - If any requirement (such as live browser WebGL FPS testing) is pending manual verification, mark it honestly rather than claiming it was run.
 
 4. **Check git cleanliness**:
    - Stage files explicitly (`git add <paths>`); never use `git add -A` or `git add .`.
