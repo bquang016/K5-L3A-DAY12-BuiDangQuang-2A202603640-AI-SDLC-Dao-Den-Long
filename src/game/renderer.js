@@ -334,10 +334,10 @@ export class IslandRenderer {
         const len = Math.hypot(6, 3); // sqrt(36 + 9)
         const rampMesh = new THREE.Mesh(new THREE.BoxGeometry(len, 0.3, 3.0), woodMat);
         const midR = 27;
-        rampMesh.position.set(midR * Math.cos(rad), 1.4, midR * Math.sin(rad));
+        rampMesh.position.set(midR * Math.cos(rad), 1.35, midR * Math.sin(rad));
         rampMesh.rotation.order = 'YXZ';
         rampMesh.rotation.y = -rad;
-        rampMesh.rotation.z = Math.atan2(3, 6);
+        rampMesh.rotation.z = -Math.atan2(3, 6);
         rampMesh.receiveShadow = true;
         rampMesh.castShadow = true;
         this.worldGroup.add(rampMesh);
