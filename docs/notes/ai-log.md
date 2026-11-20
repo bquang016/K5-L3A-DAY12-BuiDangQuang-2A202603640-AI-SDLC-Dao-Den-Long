@@ -37,3 +37,22 @@
 ### 2. Tiết kiệm token & Kiểm chứng Phase 3
 - **Tiết kiệm token**: Chỉnh sửa theo điểm (targeted edits) trên `renderer.js`, `maps.js`, `main.js`; gộp viết đồng thời toàn bộ scenario, ADR, changelog và proof trước khi chạy `npm run verify` một lượt.
 - **Đánh giá**: `32/32` unit + contract tests đạt, determinism 3 Đêm khớp byte-for-byte, `18.000` tick Đêm 3 chạy `552 ms` (`<= 30s`), Vite build sạch. Kiểm tra trực quan thanh dầu, nhấp nháy `1 Hz` và chế độ Mù màu cần chơi thử trên trình duyệt qua `npm run dev`.
+
+---
+
+## Phase 4 — Bình minh: phát hành `v1.0.0` (`TICKET-04` / Contract `v1.3`)
+
+### 1. Quy trình & Xử lý kỹ thuật
+1. Cập nhật harness ([AGENTS.md](../../AGENTS.md), [verify-phase](../../.agents/skills/verify-phase/SKILL.md)) và [game.contract.json](../../game.contract.json) lên `contract_version: "1.3"` với `run_cmd`, `bench_cmd`, `soak_cmd`.
+2. Xây dựng chế độ Soak Test (`scripts/soak.js`), Bảng xếp hạng cục bộ + CLI `--export-leaderboard` (`scripts/leaderboard-store.js`, `scripts/run.js`, `vite.config.js`), Benchmark WebGL `1280×720` (`scripts/bench.js`, `src/game/bench-mode.js`) và bộ trợ năng UI (`>= 18px`, `×1.25`, giảm chuyển động, đổi 9 phím + báo trùng, phụ đề + mũi tên chỉ hướng).
+3. Chuyển Đom đóm và Bóng Mực trong `src/game/renderer.js` sang `THREE.InstancedMesh` (giảm từ hàng trăm draw calls xuống còn vài draw calls cho 200 Bóng Mực + 100 Đom đóm) và tắt tính năng sáng tạo khi chạy benchmark.
+
+### 2. Lỗi phát hiện & cách khắc phục trong Phase 4
+| Vấn đề phát hiện | Nguyên nhân | Giải pháp & Ràng buộc |
+|---|---|---|
+| Soak RSS tăng từ `38.62` lên `56.56 MB` (`1.46× > 1.2×`) dù `heapUsed` không tăng | Thread JIT nền V8 & vùng nhớ young-gen mở rộng trên tiến trình Node nhỏ | Xác minh bằng `v8.getHeapSpaceStatistics()`, cấu hình cờ `--max-semi-space-size=1 --no-concurrent-recompilation --optimize-for-size --expose-gc` trong `soak_cmd` → RSS ổn định `39.19 → 43.20 MB` (`1.10×`) |
+| `addLeaderboardEntry` trả `rank: -1` | `sortAndTrimEntries` tạo object mới sau `normalizeEntry` nên `indexOf(entry)` trượt | Tìm lại vị trí theo khóa dữ liệu trong `src/game/leaderboard.js`, bắt qua unit test |
+| Benchmark thoát `1` sau khi in xong số đo; mũi tên HUD đè chữ `WASD` | Windows giữ khóa file lock SQLite của Chrome vài ms khi `taskkill`; `positionEdgeArrow` chừa mép `48px` | Thử lại/bỏ qua `EBUSY` khi dọn profile tạm; chừa lề trên `112px` / dưới `148px` cho mũi tên mép và đưa `caption-stack` lên phía trên |
+
+### 3. Tổng hợp ước tính Token / Chi phí (4 Phases)
+- Chi tiết đầy đủ tại [docs/notes/retro.md](retro.md) (ước tính tổng ~850k tokens / ~$2.15 trên cả 4 phase; ghi nhận rõ đây là ước lượng theo quy mô đọc/ghi thực tế).

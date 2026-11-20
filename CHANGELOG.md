@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.0] — Phase 4 (`TICKET-04`: Bình minh — Contract `v1.3`)
+
+### Added
+- **Test Contract nâng cấp lên `v1.3`** ([game.contract.json](game.contract.json)): bổ sung `bench_cmd`, `soak_cmd`, và `run_cmd` (`node scripts/run.js`) hỗ trợ `--export-leaderboard`.
+- **Chế độ Benchmark 3D (`scripts/bench.js`, `src/game/bench-mode.js`)**: mở cửa sổ `1280×720` tắt VSync (`--disable-gpu-vsync`), cảnh chuẩn Đêm 1 với `L1–L3` sáng (`fuel: 100`), đúng `200` Bóng Mực `wander` + `100` đom đóm, camera quay tròn `r=30 m, Y=15 m` (`15s`/vòng CCW), đo `avg_fps`, `p1_low_fps`, `frame_ms_p95`, `load_ms`, `peak_mem_mb` vào [bench.json](bench.json).
+- **Tối ưu Instanced Rendering (`src/game/renderer.js`)**: chuyển Đom đóm và Bóng Mực sang `THREE.InstancedMesh` kèm tái sử dụng vector/matrix nháp và tắt hiệu ứng sáng tạo khi benchmark/soak.
+- **Soak Test dài hạn (`scripts/soak.js`)**: chạy headless `10` Đêm liên tiếp xoay vòng Đêm `1 → 2 → 3`, theo dõi `crashes` và RSS `mem_start_mb` → `mem_end_mb` với cờ V8 ổn định bộ nhớ (`soak.json`).
+- **Bảng xếp hạng cục bộ (`src/game/leaderboard.js`, `scripts/leaderboard-store.js`, `scripts/run.js`, `vite.config.js`)**: nhập tên `3–12` ký tự (hỗ trợ cả tiếng Việt NFC), lưu Top `10` theo `score` giảm dần / `achieved_at` sớm hơn đứng trên, xem từ menu chính, lưu ra đĩa cục bộ và xuất qua `node scripts/run.js --export-leaderboard <out.json>`.
+- **Dễ tiếp cận (Accessibility)**: đổi tất cả `9` phím điều khiển + cảnh báo trùng phím + nút *Khôi phục mặc định*; phụ đề & mũi tên mép màn hình khi Bóng Mực xuất hiện, gió sắp thổi, `10s` cuối, đèn `< 30` dầu; tắt rung & chớp màn hình (*Giảm chuyển động*); cỡ chữ tối thiểu `18px` tại `1280×720` kèm nút phóng to `×1.25`.
+- **Đóng gói phát hành**: `npm start` (`scripts/run.js`), `Dockerfile`, `.dockerignore`, ảnh chụp `1280×720`, Retro 4 phase ([docs/notes/retro.md](docs/notes/retro.md)) và bằng chứng Phase 4 ([docs/proof/phase-4.md](docs/proof/phase-4.md)).
+
+### Fixed
+- Sửa lỗi mất trạng thái chế độ Mù màu khi chuyển màn trong `_clearMapMeshes()` (`src/game/renderer.js`).
+- Sửa lỗi mũi tên chỉ hướng đèn mép màn hình chồng lên bảng phím gợi ý ở góc dưới-trái và căn lại vị trí phụ đề khỏi che nhân vật Mây.
+- Sửa lỗi hoàn trả thứ hạng `-1` trong `addLeaderboardEntry` do so sánh tham chiếu object sau chuẩn hóa.
+
+---
+
 ## [1.2.0] — Phase 3 (`TICKET-03`: Đèn cạn dầu)
 
 ### Breaking Changes

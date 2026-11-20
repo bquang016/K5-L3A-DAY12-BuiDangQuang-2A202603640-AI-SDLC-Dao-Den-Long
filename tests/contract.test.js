@@ -82,10 +82,11 @@ function runScenario({ night = 1, scenarioFile, inputsFile = null, ticks, snapsh
   return records;
 }
 
-test('game.contract.json is Contract v1.2 and matches DEFAULT_TUNING', () => {
+test('game.contract.json is Contract v1.3 and matches DEFAULT_TUNING', () => {
   const contract = JSON.parse(fs.readFileSync(path.join(ROOT, 'game.contract.json'), 'utf8'));
-  assert.equal(contract.contract_version, '1.2');
+  assert.equal(contract.contract_version, '1.3');
   assert.ok(contract.team && contract.team !== 'mssv-ho-ten');
+  assert.ok(contract.run_cmd && contract.bench_cmd && contract.soak_cmd);
   assert.deepEqual(contract.tuning, DEFAULT_TUNING);
 });
 
@@ -380,6 +381,66 @@ test('CLI exits 2 on invalid JSON/schema and non-zero on invalid flags or night'
     2
   );
   assert.notEqual(runCli(['--seed', '1', '--night', '4', '--ticks', '5', '--out', out]).status, 0);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('Contract v1.3: --export-leaderboard exports sorted {"entries": [...]} and soak_cmd passes without leaks', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ddl-v13-'));
+  const storePath = path.join(tmpDir, 'lb.json');
+  const exportEmpty = path.join(tmpDir, 'export-empty.json');
+  const exportPop = path.join(tmpDir, 'export-pop.json');
+  const soakOut = path.join(tmpDir, 'soak.json');
+
+  const rEmpty = spawnSync(process.execPath, ['scripts/run.js', '--export-leaderboard', exportEmpty], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, DAO_DEN_LONG_LEADERBOARD_PATH: storePath }
+  });
+  assert.equal(rEmpty.status, 0, rEmpty.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(exportEmpty, 'utf8')), { entries: [] });
+
+  fs.writeFileSync(
+    storePath,
+    JSON.stringify({
+      entries: [
+        { name: 'Second', score: 500, nights_won: 1, achieved_at: '2026-11-20T10:10:00+07:00', seed: 2 },
+        { name: 'First', score: 500, nights_won: 1, achieved_at: '2026-11-20T10:00:00+07:00', seed: 1 }
+      ]
+    })
+  );
+  const rPop = spawnSync(process.execPath, ['scripts/run.js', '--export-leaderboard', exportPop], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, DAO_DEN_LONG_LEADERBOARD_PATH: storePath }
+  });
+  assert.equal(rPop.status, 0, rPop.stderr);
+  const exported = JSON.parse(fs.readFileSync(exportPop, 'utf8'));
+  assert.deepEqual(exported.entries.map((e) => e.name), ['First', 'Second']);
+
+  const rSoak = spawnSync(
+    process.execPath,
+    [
+      '--max-semi-space-size=1',
+      '--no-concurrent-recompilation',
+      '--optimize-for-size',
+      '--expose-gc',
+      'scripts/soak.js',
+      '--seed',
+      '7',
+      '--nights',
+      '3',
+      '--out',
+      soakOut
+    ],
+    { cwd: ROOT, encoding: 'utf8' }
+  );
+  assert.equal(rSoak.status, 0, rSoak.stderr);
+  const soak = JSON.parse(fs.readFileSync(soakOut, 'utf8'));
+  assert.equal(soak.nights, 3);
+  assert.equal(soak.crashes, 0);
+  assert.equal(soak.results.length, 3);
+  assert.ok(soak.mem_end_mb <= 1.2 * soak.mem_start_mb, `RSS grew too much: ${soak.mem_start_mb} -> ${soak.mem_end_mb}`);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });

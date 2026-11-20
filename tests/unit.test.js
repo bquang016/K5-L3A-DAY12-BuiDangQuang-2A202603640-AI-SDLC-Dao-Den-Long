@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { computeBenchStats } from '../src/game/bench-stats.js';
+import {
+  DEFAULT_KEYBINDS,
+  findKeybindConflicts,
+  formatKeyCode,
+  normalizeKeybinds
+} from '../src/game/keybinds.js';
+import {
+  addLeaderboardEntry,
+  sortAndTrimEntries,
+  validateLeaderboardName
+} from '../src/game/leaderboard.js';
 import { DEFAULT_TUNING } from '../src/sim/config.js';
 import { getMapConfig, getSurfaceHeight } from '../src/sim/maps.js';
 import { distXZ, rotateMove } from '../src/sim/math.js';
@@ -250,4 +262,73 @@ test('sim and headless modules never reference browser, Three.js, Math.random, o
       }
     }
   }
+});
+
+test('leaderboard validates 3-12 char names (ASCII + Vietnamese), sorts descending, breaks ties by earliest achieved_at, and keeps top 10', () => {
+  assert.equal(validateLeaderboardName('May_01').valid, true);
+  assert.equal(validateLeaderboardName('MâyĐảo1').valid, true);
+  assert.equal(validateLeaderboardName('ab').valid, false);
+  assert.equal(validateLeaderboardName('NameTooLong123').valid, false);
+  assert.equal(validateLeaderboardName('Bad Name').valid, false);
+
+  const seedEntries = [];
+  for (let i = 1; i <= 11; i += 1) {
+    seedEntries.push({
+      name: `User_${i}`,
+      score: i * 100,
+      nights_won: i % 4,
+      achieved_at: `2026-11-20T10:${String(i).padStart(2, '0')}:00+07:00`,
+      seed: i
+    });
+  }
+  seedEntries.push({
+    name: 'EarlierTie',
+    score: 1000,
+    nights_won: 3,
+    achieved_at: '2026-11-20T09:59:00+07:00',
+    seed: 99
+  });
+
+  const top = sortAndTrimEntries(seedEntries);
+  assert.equal(top.length, 10);
+  assert.equal(top[0].name, 'User_11');
+  assert.equal(top[1].name, 'EarlierTie');
+  assert.equal(top[2].name, 'User_10');
+
+  const added = addLeaderboardEntry(top, {
+    name: 'Champion',
+    score: 2000,
+    nights_won: 3,
+    achieved_at: '2026-11-20T12:00:00+07:00',
+    seed: 42
+  });
+  assert.equal(added.rank, 1);
+  assert.equal(added.entries.length, 10);
+  assert.equal(added.entries[0].name, 'Champion');
+});
+
+test('computeBenchStats calculates exact Contract v1.3 avg_fps, p1_low_fps, and frame_ms_p95', () => {
+  // 100 frames: 99 frames of 10ms + 1 spike frame of 50ms -> sum = 1040ms
+  const dts = Array(99).fill(10);
+  dts.push(50);
+  const stats = computeBenchStats(dts);
+  assert.equal(stats.frames, 100);
+  assert.equal(stats.avg_fps, 96.2); // 1000 * 100 / 1040 = 96.1538 -> 96.2
+  assert.equal(stats.p1_low_fps, 20); // k = ceil(0.01*100) = 1 -> 1000 / 50 = 20
+  assert.equal(stats.frame_ms_p95, 10);
+});
+
+test('keybind helpers normalize defaults, format codes, and detect duplicate key conflicts', () => {
+  const kb = normalizeKeybinds({ jump: 'KeyK' });
+  assert.equal(kb.jump, 'KeyK');
+  assert.equal(kb.interact, DEFAULT_KEYBINDS.interact);
+  assert.equal(findKeybindConflicts(kb).length, 0);
+  assert.equal(formatKeyCode('KeyK'), 'K');
+  assert.equal(formatKeyCode('Space'), 'Space');
+
+  const dup = { ...DEFAULT_KEYBINDS, dash: 'Space' };
+  const conflicts = findKeybindConflicts(dup);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].code, 'Space');
+  assert.deepEqual(conflicts[0].actions.sort(), ['dash', 'jump']);
 });
