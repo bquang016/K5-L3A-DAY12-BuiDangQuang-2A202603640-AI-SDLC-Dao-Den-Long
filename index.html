@@ -8,7 +8,7 @@
       :root {
         --sky: #0e1430;
         --panel-bg: rgba(14, 20, 48, 0.82);
-        --panel-border: rgba(242, 193, 78, 0.34);
+        --panel-border: rgba(242, 193, 78, 0.36);
         --gold: #f2c14e;
         --lantern: #ffb347;
         --danger: #ff5a5f;
@@ -49,6 +49,31 @@
         justify-content: space-between;
         padding: 16px;
         z-index: 10;
+      }
+
+      .hud-flash {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.12s ease-out;
+        z-index: 8;
+      }
+
+      .hud-reticle {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 6px;
+        height: 6px;
+        margin-left: -3px;
+        margin-top: -3px;
+        border-radius: 50%;
+        background: rgba(255, 233, 176, 0.65);
+        box-shadow: 0 0 8px rgba(242, 193, 78, 0.85);
+        pointer-events: none;
+        display: none;
+        z-index: 9;
       }
 
       .hud-top {
@@ -106,22 +131,21 @@
 
       .flames-row {
         display: flex;
-        gap: 8px;
+        gap: 6px;
         align-items: center;
       }
 
-      .flame-pip {
-        width: 18px;
-        height: 18px;
-        border-radius: 50% 50% 50% 0;
-        transform: rotate(-45deg);
-        background: linear-gradient(135deg, #ffe9b0, #ffb347);
-        box-shadow: 0 0 10px rgba(255, 179, 71, 0.85);
+      .flame-icon {
+        width: 22px;
+        height: 22px;
+        color: var(--lantern);
+        filter: drop-shadow(0 0 6px rgba(255, 179, 71, 0.85));
+        transition: opacity 0.2s;
       }
 
-      .flame-pip.lost {
-        background: rgba(143, 163, 184, 0.22);
-        box-shadow: none;
+      .flame-icon.lost {
+        color: #5b5f6e;
+        filter: none;
         opacity: 0.35;
       }
 
@@ -134,6 +158,19 @@
         font-weight: 600;
         background: rgba(200, 16, 46, 0.28);
         border: 1px solid #f2c14e;
+        color: #ffe9b0;
+      }
+
+      .lock-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        padding: 3px 8px;
+        border-radius: 8px;
+        font-size: 11px;
+        background: rgba(242, 193, 78, 0.14);
+        border: 1px solid rgba(242, 193, 78, 0.36);
         color: #ffe9b0;
       }
 
@@ -173,22 +210,19 @@
 
       .lantern-pips {
         display: flex;
-        gap: 5px;
+        gap: 4px;
         align-items: center;
       }
 
-      .lantern-pip {
-        width: 12px;
-        height: 16px;
-        border-radius: 3px;
-        border: 1px solid rgba(242, 193, 78, 0.4);
-        background: #5b5f6e;
+      .lantern-svg {
+        width: 16px;
+        height: 20px;
+        color: #5b5f6e;
       }
 
-      .lantern-pip.lit {
-        background: linear-gradient(180deg, #ffe9b0, #ffb347);
-        border-color: #ffe9b0;
-        box-shadow: 0 0 10px rgba(255, 179, 71, 0.9);
+      .lantern-svg.lit {
+        color: var(--lantern);
+        filter: drop-shadow(0 0 6px rgba(255, 179, 71, 0.9));
       }
 
       .mote-bar-panel {
@@ -224,7 +258,7 @@
       }
 
       .ability-card {
-        min-width: 118px;
+        min-width: 122px;
         text-align: center;
         padding: 8px 12px;
         border-radius: 12px;
@@ -239,6 +273,10 @@
       }
 
       .ability-title {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
         font-size: 12px;
         font-weight: 700;
       }
@@ -270,6 +308,16 @@
       .prompt-pill.visible {
         opacity: 1;
         transform: translateY(0);
+      }
+
+      .lock-hint-pill {
+        background: rgba(14, 20, 48, 0.86);
+        border: 1px solid rgba(242, 193, 78, 0.45);
+        color: #f5f1e6;
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 12px;
+        display: none;
       }
 
       .whisper-banner {
@@ -437,12 +485,32 @@
       .setting-row label {
         display: flex;
         justify-content: space-between;
+        align-items: center;
         font-size: 14px;
         margin-bottom: 6px;
       }
 
       .setting-row input[type='range'] {
         width: 100%;
+        accent-color: #f2c14e;
+      }
+
+      .setting-check {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(14, 20, 48, 0.55);
+        border: 1px solid rgba(242, 193, 78, 0.25);
+        margin: 14px 0;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      .setting-check input {
+        width: 18px;
+        height: 18px;
         accent-color: #f2c14e;
       }
 

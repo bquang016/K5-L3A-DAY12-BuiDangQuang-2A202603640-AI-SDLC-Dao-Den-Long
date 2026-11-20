@@ -28,7 +28,8 @@ npm run verify   # 3. Kiểm chứng toàn bộ (26 test, determinism 3 Đêm, h
 | `Shift` | Lướt (`14 m/s` trong `0.2s`, hồi chiêu `1.5s`, giữ nguyên độ cao) |
 | `E` *(hoặc `F` / `Enter`)* | Nạp đom đóm vào Đèn Lồng Lớn gần nhất (trong `2.0 m`) |
 | `Q` *(hoặc `X`)* | Tỏa Sáng (`3` đom đóm, bán kính 3D `5 m`, đẩy `4 m`, choáng `2 s`, hồi `3 s`) |
-| `Kéo chuột` *(hoặc `[` / `]`)* | Xoay camera (chỉnh độ nhạy & âm lượng trong **Cài đặt**) |
+| `Kéo chuột` / `Ẩn chuột (Pointer Lock)` + `Cuộn` | Xoay camera 360° & Zoom góc nhìn (bật/tắt chế độ ẩn chuột bằng phím `C` hoặc trong **Cài đặt**) |
+| `C` | Chuyển đổi chế độ **Ẩn chuột xoay tự do** / **Kéo chuột** |
 | `Esc` / `P` | Tạm dừng (`Tiếp tục`, `Chơi lại Đêm`, `Cài đặt`, `Về menu`) |
 | `M` | Tắt / Bật nhanh âm thanh |
 
@@ -69,6 +70,7 @@ Toàn bộ mở rộng nằm hoàn toàn trong `src/game/`, giữ nguyên 100% �
 1. **Dòng đom đóm dẫn đường (`src/game/renderer.js`):** Khi mang đủ `>= 10` đom đóm, các hạt sáng vàng bay dẫn hướng tới Đèn Lồng chưa sáng gần nhất.
 2. **Đèn trời & Lời nhắn Ông Đăng (`src/game/renderer.js`, `src/game/hud.js`):** Giới thiệu từng Đêm qua lời dặn của Ông Đăng, thả 3 đèn trời mỗi lần thắp đèn và nhắc tương tác theo ngữ cảnh.
 3. **Nhạc nền & Hiệu ứng âm thanh ngũ cung Web Audio (`src/game/audio.js`):** Tổng hợp thời gian thực toàn bộ âm thanh (nhạc đêm, nhặt, nạp, thắp đèn, nhảy, bục nhảy, lướt, tỏa sáng, va chạm, Bóng Mực xuất hiện, Gió Lạc cướp, gió mạnh, đếm ngược 10s cuối) mà không cần file audio ngoài.
+4. **Đồ họa PBR thủ tục & Điều khiển Pointer Lock (`src/game/textures.js`, `src/game/renderer.js`, `src/game/input.js`):** Tạo vân gỗ/cỏ/cát/đá bằng Canvas texture kèm bump map, trăng rằm và quầng sáng mềm additive, cỏ lay gió instanced, hoạt ảnh bước đi/khăn bay/đèn lắc cho Mây, hiệu ứng rung camera/FOV khi Lướt, cùng chế độ **ẩn chuột xoay 360° (Pointer Lock)** + cuộn zoom có thể bật/tắt bằng phím `C`.
 
 **Bằng chứng phần lõi không bị ảnh hưởng:** `tests/unit.test.js` kiểm tra tĩnh xác nhận `src/sim/` và `src/headless/` không phụ thuộc render/API trình duyệt; `npm run verify` vượt qua 26/26 test và trùng khớp SHA-256 trên cả 3 Đêm.
 

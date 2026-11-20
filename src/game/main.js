@@ -14,13 +14,14 @@ function loadSettings() {
       const parsed = JSON.parse(raw);
       return {
         volume: Number.isFinite(parsed.volume) ? parsed.volume : 0.75,
-        mouseSensitivity: Number.isFinite(parsed.mouseSensitivity) ? parsed.mouseSensitivity : 1.0
+        mouseSensitivity: Number.isFinite(parsed.mouseSensitivity) ? parsed.mouseSensitivity : 1.0,
+        pointerLockEnabled: typeof parsed.pointerLockEnabled === 'boolean' ? parsed.pointerLockEnabled : true
       };
     }
   } catch {
     // ignore storage errors
   }
-  return { volume: 0.75, mouseSensitivity: 1.0 };
+  return { volume: 0.75, mouseSensitivity: 1.0, pointerLockEnabled: true };
 }
 
 function saveSettings(settings) {
@@ -55,6 +56,7 @@ function prepareNight(night, resetCampaign = false) {
   runSeed += 1;
   sim = new LanternIslandSim({ seed: runSeed, night });
   renderer.rebuildMap(night);
+  input.exitPointerLock();
   input.resetCameraForNight();
   accumulator = 0;
   lastCountdownSec = null;
@@ -62,6 +64,29 @@ function prepareNight(night, resetCampaign = false) {
   prevWindActive = false;
   phase = 'intro';
   hud.showIntro(night);
+}
+
+function enterPause() {
+  if (phase !== 'playing') return;
+  input.exitPointerLock();
+  sim.step({ pause: true });
+  sim.step({ pause: false });
+  phase = 'paused';
+  hud.setPaused(true);
+}
+
+function resumeFromPause() {
+  if (phase !== 'paused') return;
+  if (sim.state === 'paused') {
+    sim.step({ pause: true });
+    sim.step({ pause: false });
+  }
+  phase = 'playing';
+  hud.setPaused(false);
+  if (settings.pointerLockEnabled) {
+    input.requestPointerLock();
+  }
+  lastFrameMs = performance.now();
 }
 
 const hud = new GameHud(hudEl, {
@@ -72,24 +97,16 @@ const hud = new GameHud(hudEl, {
     sound.unlock();
     sound.startMusic();
     phase = 'playing';
-    lastFrameMs = performance.now();
-  },
-  onResume: () => {
-    if (sim.state === 'paused') {
-      sim.step({ pause: true });
-      sim.step({ pause: false });
+    if (settings.pointerLockEnabled) {
+      input.requestPointerLock();
     }
-    phase = 'playing';
-    hud.setPaused(false);
     lastFrameMs = performance.now();
   },
-  onRestartNight: () => {
-    prepareNight(currentNight, false);
-  },
-  onNextNight: () => {
-    prepareNight(Math.min(3, currentNight + 1), false);
-  },
+  onResume: resumeFromPause,
+  onRestartNight: () => prepareNight(currentNight, false),
+  onNextNight: () => prepareNight(Math.min(3, currentNight + 1), false),
   onBackToMenu: () => {
+    input.exitPointerLock();
     sound.stopMusic();
     phase = 'menu';
     hud.showMenu();
@@ -97,31 +114,43 @@ const hud = new GameHud(hudEl, {
   onSettingsChange: (next) => {
     settings.volume = next.volume;
     settings.mouseSensitivity = next.mouseSensitivity;
+    settings.pointerLockEnabled = next.pointerLockEnabled;
     sound.setVolume(settings.volume);
     input.setMouseSensitivity(settings.mouseSensitivity);
+    input.setPointerLockEnabled(settings.pointerLockEnabled);
+    hud.syncSettingsUi(settings);
     saveSettings(settings);
   }
 });
 
 function togglePause() {
-  if (phase === 'playing') {
-    sim.step({ pause: true });
-    sim.step({ pause: false });
-    phase = 'paused';
-    hud.setPaused(true);
-  } else if (phase === 'paused') {
-    sim.step({ pause: true });
-    sim.step({ pause: false });
-    phase = 'playing';
-    hud.setPaused(false);
-    lastFrameMs = performance.now();
-  }
+  if (phase === 'playing') enterPause();
+  else if (phase === 'paused') resumeFromPause();
 }
 
 const input = new InputController(renderer.renderer.domElement, {
   mouseSensitivity: settings.mouseSensitivity,
+  pointerLockEnabled: settings.pointerLockEnabled,
   onMuteToggle: () => sound.toggleMute(),
-  onPauseToggle: togglePause
+  onPauseToggle: togglePause,
+  onPointerLockChange: (locked, { userExited }) => {
+    if (!locked && userExited && phase === 'playing') {
+      enterPause();
+    }
+  },
+  onPointerLockModeToggle: (enabled) => {
+    settings.pointerLockEnabled = enabled;
+    hud.syncSettingsUi(settings);
+    saveSettings(settings);
+    hud.showWhisper(
+      enabled
+        ? 'Chế độ ẩn chuột xoay 360°: BẬT (Click màn hình để khóa chuột)'
+        : 'Chế độ ẩn chuột xoay 360°: TẮT (Giữ kéo chuột để xoay)'
+    );
+    if (enabled && phase === 'playing') {
+      input.requestPointerLock();
+    }
+  }
 });
 
 function handleSimEvents(events) {
@@ -137,6 +166,8 @@ function handleSimEvents(events) {
     } else if (ev.name === 'pulse') {
       sound.playPulse();
       renderer.triggerPulseFx(sim.player.pos);
+      renderer.triggerShake(0.28);
+      hud.flashPulse();
     } else if (ev.name === 'dash') {
       sound.playDash();
     } else if (ev.name === 'charm_picked') {
@@ -149,7 +180,10 @@ function handleSimEvents(events) {
       sound.playShadeSpawn();
     } else if (ev.name === 'player_hit') {
       sound.playHit();
+      renderer.triggerShake(0.55);
+      hud.flashHit();
     } else if (ev.name === 'game_over') {
+      input.exitPointerLock();
       phase = 'ended';
       if (ev.data.result === 'won') {
         totalCampaignScore += sim.score;
@@ -203,8 +237,8 @@ function frame(nowMs) {
     }
   }
 
-  renderer.render(sim, input.camYawDeg, frameDt);
-  hud.update(sim, renderer, frameDt);
+  renderer.render(sim, input.getCameraState(), frameDt);
+  hud.update(sim, renderer, frameDt, { phase, input });
 
   requestAnimationFrame(frame);
 }

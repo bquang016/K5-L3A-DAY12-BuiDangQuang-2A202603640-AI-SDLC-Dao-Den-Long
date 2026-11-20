@@ -18,6 +18,11 @@ const NIGHT_INTROS = {
   }
 };
 
+const SVG_FLAME = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 2C12.5 2 18 7.2 18 13a6 6 0 1 1-12 0c0-3.2 1.8-6.1 3.7-8.1-.2 1.8.8 3.2 2.1 3.7C11.2 6.5 12.5 2 12.5 2Z"/></svg>`;
+const SVG_LANTERN = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 2h6v2h-6V2Zm-2 4h10l1.5 3v9L16 21H8l-2.5-3V9L7 6Zm3 17h4v1h-4v-1Z"/></svg>`;
+const SVG_DASH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 10-12h-6l0-8Z"/></svg>`;
+const SVG_PULSE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2Z"/></svg>`;
+
 export class GameHud {
   constructor(
     root,
@@ -47,7 +52,7 @@ export class GameHud {
     };
 
     this.whisperTimer = 0;
-    this.lastLitCount = 0;
+    this.flashTimer = 0;
     this.settingsOrigin = 'menu';
 
     this._buildDom();
@@ -55,12 +60,16 @@ export class GameHud {
 
   _buildDom() {
     this.root.innerHTML = `
+      <div class="hud-flash" id="hud-flash"></div>
+      <div class="hud-reticle" id="hud-reticle"></div>
+
       <div class="hud-top">
         <div class="hud-panel justify-start">
           <div class="stat-line">
             <span class="label">Ngọn lửa</span>
             <div class="flames-row" id="hud-flames"></div>
           </div>
+          <div class="lock-badge" id="hud-lock-badge">[C] Ẩn chuột: Bật</div>
           <div id="hud-charm-tag" class="charm-tag" style="display:none;"></div>
         </div>
 
@@ -84,14 +93,15 @@ export class GameHud {
 
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
         <div id="hud-wind-banner" class="wind-banner" style="display:none;"></div>
+        <div class="lock-hint-pill" id="hud-lock-hint">Nhấp vào màn hình để ẩn chuột xoay 360° · [C] Đổi chế độ chuột</div>
         <div class="whisper-banner" id="hud-whisper"></div>
         <div class="prompt-pill" id="hud-prompt"></div>
       </div>
 
       <div class="hud-bottom">
         <div class="hud-panel justify-start" style="font-size:12px;color:#b8c2d9;line-height:1.5;">
-          <div><strong>WASD</strong> Di chuyển · <strong>Space</strong> Nhảy · <strong>Shift</strong> Lướt</div>
-          <div><strong>E</strong> Nạp đèn · <strong>Q/X</strong> Tỏa sáng · <strong>Esc/P</strong> Tạm dừng</div>
+          <div><strong>WASD</strong> Đi · <strong>Space</strong> Nhảy · <strong>Shift</strong> Lướt · <strong>E</strong> Nạp · <strong>Q</strong> Tỏa Sáng</div>
+          <div><strong>Chuột</strong> Xoay 360° · <strong>Cuộn</strong> Zoom · <strong>[C]</strong> Ẩn/hiện chuột · <strong>Esc/P</strong> Dừng</div>
         </div>
 
         <div class="hud-panel mote-bar-panel justify-center">
@@ -103,11 +113,11 @@ export class GameHud {
 
         <div class="abilities-row justify-end">
           <div class="ability-card" id="hud-dash-card">
-            <div class="ability-title">[Shift] Lướt</div>
+            <div class="ability-title">${SVG_DASH} [Shift] Lướt</div>
             <div class="ability-state" id="hud-dash-state">Sẵn sàng</div>
           </div>
           <div class="ability-card" id="hud-pulse-card">
-            <div class="ability-title">[Q] Tỏa Sáng (3)</div>
+            <div class="ability-title">${SVG_PULSE} [Q] Tỏa Sáng (3)</div>
             <div class="ability-state" id="hud-pulse-state">Sẵn sàng</div>
           </div>
         </div>
@@ -170,6 +180,10 @@ export class GameHud {
             <label><span>Độ nhạy chuột</span><span id="set-sens-val">1.0x</span></label>
             <input type="range" id="set-sens" min="0.3" max="2.2" step="0.1" value="1.0" />
           </div>
+          <label class="setting-check" for="set-pointer-lock">
+            <span>Khóa chuột xoay 360° (Ẩn con trỏ)</span>
+            <input type="checkbox" id="set-pointer-lock" checked />
+          </label>
           <button class="primary-btn" id="btn-settings-close">Lưu & Đóng</button>
         </div>
       </div>
@@ -188,6 +202,10 @@ export class GameHud {
       </div>
     `;
 
+    this.elFlash = this.root.querySelector('#hud-flash');
+    this.elReticle = this.root.querySelector('#hud-reticle');
+    this.elLockBadge = this.root.querySelector('#hud-lock-badge');
+    this.elLockHint = this.root.querySelector('#hud-lock-hint');
     this.elFlames = this.root.querySelector('#hud-flames');
     this.elCharmTag = this.root.querySelector('#hud-charm-tag');
     this.elNightLabel = this.root.querySelector('#hud-night-label');
@@ -216,11 +234,9 @@ export class GameHud {
     this.volLabel = this.root.querySelector('#set-vol-val');
     this.sensSlider = this.root.querySelector('#set-sens');
     this.sensLabel = this.root.querySelector('#set-sens-val');
+    this.lockCheckbox = this.root.querySelector('#set-pointer-lock');
 
-    this.volSlider.value = String(Math.round(this.settings.volume * 100));
-    this.volLabel.textContent = `${this.volSlider.value}%`;
-    this.sensSlider.value = String(this.settings.mouseSensitivity);
-    this.sensLabel.textContent = `${this.settings.mouseSensitivity.toFixed(1)}x`;
+    this.syncSettingsUi(this.settings);
 
     this.root.querySelector('#btn-campaign').addEventListener('click', () => {
       this.menuModal.classList.add('hidden');
@@ -260,22 +276,24 @@ export class GameHud {
       this.callbacks.onBackToMenu?.();
     });
 
-    this.volSlider.addEventListener('input', () => {
-      const v = Number(this.volSlider.value);
-      this.volLabel.textContent = `${v}%`;
-      this.callbacks.onSettingsChange?.({
-        volume: v / 100,
-        mouseSensitivity: Number(this.sensSlider.value)
-      });
-    });
-    this.sensSlider.addEventListener('input', () => {
-      const s = Number(this.sensSlider.value);
-      this.sensLabel.textContent = `${s.toFixed(1)}x`;
+    const emitSettings = () => {
       this.callbacks.onSettingsChange?.({
         volume: Number(this.volSlider.value) / 100,
-        mouseSensitivity: s
+        mouseSensitivity: Number(this.sensSlider.value),
+        pointerLockEnabled: this.lockCheckbox.checked
       });
+    };
+
+    this.volSlider.addEventListener('input', () => {
+      this.volLabel.textContent = `${this.volSlider.value}%`;
+      emitSettings();
     });
+    this.sensSlider.addEventListener('input', () => {
+      this.sensLabel.textContent = `${Number(this.sensSlider.value).toFixed(1)}x`;
+      emitSettings();
+    });
+    this.lockCheckbox.addEventListener('change', emitSettings);
+
     this.root.querySelector('#btn-settings-close').addEventListener('click', () => {
       this.settingsModal.classList.add('hidden');
       if (this.settingsOrigin === 'pause') this.pauseModal.classList.remove('hidden');
@@ -286,6 +304,29 @@ export class GameHud {
       this.endModal.classList.add('hidden');
       this.callbacks.onBackToMenu?.();
     });
+  }
+
+  syncSettingsUi(settings) {
+    this.volSlider.value = String(Math.round(settings.volume * 100));
+    this.volLabel.textContent = `${this.volSlider.value}%`;
+    this.sensSlider.value = String(settings.mouseSensitivity);
+    this.sensLabel.textContent = `${settings.mouseSensitivity.toFixed(1)}x`;
+    this.lockCheckbox.checked = Boolean(settings.pointerLockEnabled);
+    this.elLockBadge.textContent = `[C] Ẩn chuột: ${settings.pointerLockEnabled ? 'Bật' : 'Tắt (Kéo chuột)'}`;
+  }
+
+  flashHit() {
+    this.elFlash.style.background =
+      'radial-gradient(circle, rgba(255,90,95,0) 45%, rgba(255,90,95,0.55) 100%)';
+    this.elFlash.style.opacity = '1';
+    this.flashTimer = 0.28;
+  }
+
+  flashPulse() {
+    this.elFlash.style.background =
+      'radial-gradient(circle, rgba(255,233,176,0.28) 20%, rgba(255,179,71,0) 75%)';
+    this.elFlash.style.opacity = '1';
+    this.flashTimer = 0.22;
   }
 
   showMenu() {
@@ -300,7 +341,6 @@ export class GameHud {
     const info = NIGHT_INTROS[night];
     this.root.querySelector('#intro-title').textContent = info.title;
     this.root.querySelector('#intro-quote').textContent = info.quote;
-    this.lastLitCount = 0;
     this.elWhisper.classList.remove('visible');
     this.endModal.classList.add('hidden');
     this.pauseModal.classList.add('hidden');
@@ -381,18 +421,27 @@ export class GameHud {
     this.endModal.classList.remove('hidden');
   }
 
-  update(sim, renderer, dt) {
+  update(sim, renderer, dt, { phase, input } = {}) {
     if (this.whisperTimer > 0) {
       this.whisperTimer -= dt;
       if (this.whisperTimer <= 0) this.elWhisper.classList.remove('visible');
     }
+    if (this.flashTimer > 0) {
+      this.flashTimer -= dt;
+      if (this.flashTimer <= 0) this.elFlash.style.opacity = '0';
+    }
+
+    const isPlaying = phase === 'playing' && sim.state === 'playing';
+    this.elReticle.style.display = isPlaying && input?.isPointerLocked ? 'block' : 'none';
+    this.elLockHint.style.display =
+      isPlaying && input?.pointerLockEnabled && !input?.isPointerLocked ? 'inline-block' : 'none';
 
     this.elNightLabel.textContent = `Đêm ${sim.night} · ${sim.map.name}`;
 
-    // Flames
+    // Flames with SVG icons
     let flamesHtml = '';
     for (let i = 0; i < sim.tuning.flames; i += 1) {
-      flamesHtml += `<span class="flame-pip ${i < sim.player.flames ? '' : 'lost'}"></span>`;
+      flamesHtml += `<span class="flame-icon ${i < sim.player.flames ? '' : 'lost'}">${SVG_FLAME}</span>`;
     }
     this.elFlames.innerHTML = flamesHtml;
 
@@ -403,7 +452,7 @@ export class GameHud {
       this.elCharmTag.style.display = 'none';
     }
 
-    // Timer mm:ss (red & blinking <= 30s)
+    // Timer mm:ss
     const totalSec = Math.ceil(sim.timeLeftS);
     const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
     const sec = String(totalSec % 60).padStart(2, '0');
@@ -432,7 +481,7 @@ export class GameHud {
           closestAnyUnlit = l;
         }
       }
-      lanternsHtml += `<span class="lantern-pip ${l.lit ? 'lit' : ''}"></span>`;
+      lanternsHtml += `<span class="lantern-svg ${l.lit ? 'lit' : ''}">${SVG_LANTERN}</span>`;
     }
     this.elLanterns.innerHTML = lanternsHtml;
     this.elLanternCount.textContent = `${litCount}/${sim.lanterns.length}`;
@@ -446,7 +495,7 @@ export class GameHud {
     this.elMotes.innerHTML = motesHtml;
     this.elMoteCount.textContent = `${sim.player.carried}/${sim.tuning.carry_capacity}`;
 
-    // Dash & Pulse cooldown icons
+    // Dash & Pulse cooldown cards
     if (sim.player.charmTicks > 0) {
       this.elDashCard.classList.remove('cooling');
       this.elDashState.textContent = '0s (Bùa Gió)';
@@ -469,7 +518,6 @@ export class GameHud {
       this.elPulseState.textContent = 'Sẵn sàng';
     }
 
-    // Interact prompt
     if (nearUnlit && sim.state === 'playing') {
       this.elPrompt.textContent = `E — Nạp ánh sáng (${nearUnlit.deposited}/${sim.tuning.lantern_cost})`;
       this.elPrompt.classList.add('visible');
@@ -477,7 +525,6 @@ export class GameHud {
       this.elPrompt.classList.remove('visible');
     }
 
-    // Wind banner (Night 3)
     if (sim.windEnabled && sim.wind.warning) {
       this.elWindBanner.style.display = 'inline-block';
       this.elWindBanner.textContent = 'Gió mạnh sắp thổi — bám chắc mặt đất!';
@@ -488,7 +535,6 @@ export class GameHud {
       this.elWindBanner.style.display = 'none';
     }
 
-    // Off-screen indicator arrow pointing to nearest unlit lantern
     if (closestAnyUnlit && sim.state === 'playing') {
       const proj = renderer.projectToScreen(closestAnyUnlit.pos);
       if (!proj.onScreen) {

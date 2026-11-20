@@ -1,11 +1,18 @@
 import * as THREE from 'three';
 import { DEFAULT_TUNING, PALETTE } from '../sim/config.js';
-import { getMapConfig } from '../sim/maps.js';
+import { getMapConfig, getSurfaceHeight } from '../sim/maps.js';
 import { distXZ } from '../sim/math.js';
+import {
+  getGlowTexture,
+  getGrassTextures,
+  getSandTextures,
+  getStoneTextures,
+  getWoodTextures
+} from './textures.js';
 
 /**
- * Three.js renderer supporting all 3 standardized islands (Đảo Bến, Đảo Cau, Đảo Chuông)
- * and the exact TICKET-02 color palette + lighting progression.
+ * Realistic Three.js renderer supporting all 3 standardized islands, procedural PBR textures,
+ * moon & volumetric glow sprites, instanced swaying grass, animated Mây, and smooth damped camera.
  */
 export class IslandRenderer {
   constructor(container) {
@@ -14,13 +21,13 @@ export class IslandRenderer {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(PALETTE.skyNight);
-    this.scene.fog = new THREE.FogExp2(PALETTE.fog, 0.015);
+    this.scene.fog = new THREE.FogExp2(PALETTE.fog, 0.0135);
 
     this.camera = new THREE.PerspectiveCamera(
       55,
       container.clientWidth / Math.max(1, container.clientHeight),
       0.1,
-      280
+      300
     );
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -29,23 +36,25 @@ export class IslandRenderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMappingExposure = 1.12;
     container.appendChild(this.renderer.domElement);
 
     // Exact TICKET-02 ambient formula base (0.15 + 0.55 * litRatio)
     this.ambientLight = new THREE.AmbientLight('#ffe9c9', 0.15);
     this.scene.add(this.ambientLight);
 
-    this.hemiLight = new THREE.HemisphereLight('#90a6e0', PALETTE.cloudSea, 0.45);
+    this.hemiLight = new THREE.HemisphereLight('#90a6e0', PALETTE.cloudSea, 0.48);
     this.scene.add(this.hemiLight);
 
-    this.dirLight = new THREE.DirectionalLight('#ffd7a3', 0.9);
-    this.dirLight.position.set(28, 42, 22);
+    this.dirLight = new THREE.DirectionalLight('#ffd7a3', 0.95);
+    this.dirLight.position.set(32, 48, 24);
     this.dirLight.castShadow = true;
-    this.dirLight.shadow.mapSize.set(1024, 1024);
+    this.dirLight.shadow.mapSize.set(2048, 2048);
+    this.dirLight.shadow.bias = -0.0004;
+    this.dirLight.shadow.normalBias = 0.02;
     this.dirLight.shadow.camera.near = 2;
-    this.dirLight.shadow.camera.far = 135;
-    const d = 62;
+    this.dirLight.shadow.camera.far = 150;
+    const d = 66;
     this.dirLight.shadow.camera.left = -d;
     this.dirLight.shadow.camera.right = d;
     this.dirLight.shadow.camera.top = d;
@@ -65,7 +74,20 @@ export class IslandRenderer {
     this.charmViews = new Map();
     this.pulseWaves = [];
     this.skyLanterns = [];
+    this.particles = [];
     this.wispSparks = [];
+    this.grassTufts = null;
+    this.grassMeta = [];
+    this.bellMesh = null;
+
+    this._camPos = new THREE.Vector3(0, 8, -12);
+    this._camTarget = new THREE.Vector3(0, 1.4, 0);
+    this._camInitialized = false;
+    this._shakeTrauma = 0;
+    this._walkPhase = 0;
+    this._wasGrounded = true;
+    this._dashFxAccum = 0;
+    this._dummy = new THREE.Object3D();
 
     this._buildSkyAndClouds();
     this._buildPlayer();
@@ -86,28 +108,58 @@ export class IslandRenderer {
   }
 
   _buildSkyAndClouds() {
+    // Deep misty cloud sea floor below islands
+    const seaFloor = new THREE.Mesh(
+      new THREE.CircleGeometry(240, 48),
+      new THREE.MeshBasicMaterial({ color: PALETTE.cloudSea, transparent: true, opacity: 0.72 })
+    );
+    seaFloor.rotation.x = -Math.PI / 2;
+    seaFloor.position.y = -11.2;
+    this.scene.add(seaFloor);
+
+    // Volumetric moon aligned with directional moonlight
+    const moon = new THREE.Mesh(
+      new THREE.SphereGeometry(5.5, 24, 24),
+      new THREE.MeshBasicMaterial({ color: PALETTE.lanternCore })
+    );
+    moon.position.set(80, 96, 60);
+    this.scene.add(moon);
+
+    const moonHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: getGlowTexture(PALETTE.lanternCore, '#44588a'),
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    moonHalo.position.copy(moon.position);
+    moonHalo.scale.set(34, 34, 1);
+    this.scene.add(moonHalo);
+
     const cloudMat = new THREE.MeshStandardMaterial({
       color: PALETTE.cloudSea,
-      roughness: 0.95,
+      roughness: 0.96,
       transparent: true,
-      opacity: 0.7
+      opacity: 0.68
     });
-    for (let i = 0; i < 30; i += 1) {
-      const angle = (i / 30) * Math.PI * 2;
-      const radius = 58 + (i % 5) * 16;
-      const cloud = new THREE.Mesh(new THREE.DodecahedronGeometry(7 + (i % 3) * 2.5, 1), cloudMat);
-      cloud.scale.set(1.7, 0.4, 1.4);
-      cloud.position.set(Math.cos(angle) * radius, -6 - (i % 3) * 1.4, Math.sin(angle) * radius);
-      this.cloudMeshes.push({ mesh: cloud, angle, radius, speed: 0.012 + (i % 3) * 0.004 });
+    for (let i = 0; i < 34; i += 1) {
+      const angle = (i / 34) * Math.PI * 2;
+      const radius = 56 + (i % 6) * 16;
+      const cloud = new THREE.Mesh(new THREE.DodecahedronGeometry(7.2 + (i % 3) * 2.5, 1), cloudMat);
+      cloud.scale.set(1.85, 0.36, 1.45);
+      cloud.position.set(Math.cos(angle) * radius, -5.8 - (i % 3) * 1.6, Math.sin(angle) * radius);
+      this.cloudMeshes.push({ mesh: cloud, angle, radius, speed: 0.011 + (i % 3) * 0.004 });
       this.scene.add(cloud);
     }
 
-    const starCount = 380;
+    const starCount = 420;
     const positions = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i += 1) {
       const theta = ((i * 137.508) % 360) * (Math.PI / 180);
-      const phi = Math.acos(0.12 + 0.88 * ((i * 0.6180339) % 1));
-      const r = 160;
+      const phi = Math.acos(0.1 + 0.9 * ((i * 0.6180339) % 1));
+      const r = 175;
       positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       positions[i * 3 + 1] = r * Math.cos(phi);
       positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
@@ -116,65 +168,94 @@ export class IslandRenderer {
     starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     this.starPoints = new THREE.Points(
       starGeo,
-      new THREE.PointsMaterial({ color: PALETTE.uiText, size: 0.75, transparent: true, opacity: 0.8 })
+      new THREE.PointsMaterial({ color: PALETTE.uiText, size: 0.8, transparent: true, opacity: 0.85 })
     );
     this.scene.add(this.starPoints);
   }
 
   _buildPlayer() {
     this.playerGroup = new THREE.Group();
+    this.playerVisual = new THREE.Group();
+    this.playerGroup.add(this.playerVisual);
 
-    const cloakMat = new THREE.MeshStandardMaterial({ color: PALETTE.mayCloak, roughness: 0.7 });
-    this.playerBody = new THREE.Mesh(new THREE.ConeGeometry(0.46, 1.15, 10), cloakMat);
-    this.playerBody.position.y = 0.58;
+    const cloakMat = new THREE.MeshStandardMaterial({ color: PALETTE.mayCloak, roughness: 0.72 });
+    this.playerBody = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.12, 12), cloakMat);
+    this.playerBody.position.y = 0.56;
     this.playerBody.castShadow = true;
-    this.playerGroup.add(this.playerBody);
+    this.playerVisual.add(this.playerBody);
 
-    // Red scarf (#C8102E)
-    const scarf = new THREE.Mesh(
-      new THREE.TorusGeometry(0.24, 0.08, 6, 12),
-      new THREE.MeshStandardMaterial({ color: PALETTE.mayScarf, roughness: 0.7 })
-    );
+    // Red scarf + flowing scarf tail (#C8102E)
+    const scarfMat = new THREE.MeshStandardMaterial({ color: PALETTE.mayScarf, roughness: 0.65 });
+    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.08, 8, 14), scarfMat);
     scarf.rotation.x = Math.PI / 2;
-    scarf.position.y = 1.08;
-    this.playerGroup.add(scarf);
+    scarf.position.y = 1.07;
+    this.playerVisual.add(scarf);
+
+    this.scarfTail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.45), scarfMat);
+    this.scarfTail.position.set(0, 1.0, -0.32);
+    this.scarfTail.castShadow = true;
+    this.playerVisual.add(this.scarfTail);
 
     const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.26, 12, 10),
-      new THREE.MeshStandardMaterial({ color: '#f3d2b3', roughness: 0.7 })
+      new THREE.SphereGeometry(0.26, 14, 12),
+      new THREE.MeshStandardMaterial({ color: '#f3d2b3', roughness: 0.68 })
     );
     head.position.y = 1.28;
     head.castShadow = true;
-    this.playerGroup.add(head);
+    this.playerVisual.add(head);
 
-    // Conical Nón Lá
+    // Conical Nón Lá with textured bamboo weave
+    const sandTex = getSandTextures();
     const hat = new THREE.Mesh(
-      new THREE.ConeGeometry(0.76, 0.4, 16),
-      new THREE.MeshStandardMaterial({ color: PALETTE.sand, roughness: 0.85, side: THREE.DoubleSide })
+      new THREE.ConeGeometry(0.76, 0.4, 20),
+      new THREE.MeshStandardMaterial({
+        map: sandTex.map,
+        bumpMap: sandTex.bumpMap,
+        bumpScale: 0.03,
+        roughness: 0.84,
+        side: THREE.DoubleSide
+      })
     );
     hat.position.y = 1.56;
     hat.castShadow = true;
-    this.playerGroup.add(hat);
+    this.playerVisual.add(hat);
 
-    // Hanging miniature lantern on front brim (+Z)
+    // Hanging pendulum miniature lantern on front brim (+Z)
+    this.hatLanternPivot = new THREE.Group();
+    this.hatLanternPivot.position.set(0, 1.44, 0.62);
+    this.playerVisual.add(this.hatLanternPivot);
+
     const cord = new THREE.Mesh(
       new THREE.CylinderGeometry(0.015, 0.015, 0.25, 6),
       new THREE.MeshBasicMaterial({ color: PALETTE.wood })
     );
-    cord.position.set(0, 1.32, 0.62);
-    this.playerGroup.add(cord);
+    cord.position.set(0, -0.12, 0);
+    this.hatLanternPivot.add(cord);
 
     this.hatLanternMat = new THREE.MeshStandardMaterial({
       color: PALETTE.lanternLit,
       emissive: PALETTE.lanternLit,
       emissiveIntensity: 1.5,
-      roughness: 0.4
+      roughness: 0.35
     });
     const hatLantern = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.2, 8), this.hatLanternMat);
-    hatLantern.position.set(0, 1.16, 0.62);
-    this.playerGroup.add(hatLantern);
+    hatLantern.position.set(0, -0.28, 0);
+    this.hatLanternPivot.add(hatLantern);
 
-    this.playerLight = new THREE.PointLight(PALETTE.lanternLit, 2.2, 14, 1.5);
+    const hatGlow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: getGlowTexture(PALETTE.lanternCore, PALETTE.lanternLit),
+        transparent: true,
+        opacity: 0.48,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    hatGlow.position.set(0, -0.28, 0);
+    hatGlow.scale.set(0.9, 0.9, 1);
+    this.hatLanternPivot.add(hatGlow);
+
+    this.playerLight = new THREE.PointLight(PALETTE.lanternLit, 2.4, 15, 1.45);
     this.playerLight.position.set(0, 1.2, 0.65);
     this.playerGroup.add(this.playerLight);
 
@@ -182,29 +263,32 @@ export class IslandRenderer {
   }
 
   _buildGuidingWisps() {
-    const sparkGeo = new THREE.SphereGeometry(0.09, 6, 6);
+    const sparkTex = getGlowTexture(PALETTE.moteCore, PALETTE.goldAccent);
     for (let i = 0; i < 8; i += 1) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: PALETTE.goldAccent,
+      const mat = new THREE.SpriteMaterial({
+        map: sparkTex,
         transparent: true,
-        opacity: 0
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
       });
-      const mesh = new THREE.Mesh(sparkGeo, mat);
-      this.scene.add(mesh);
-      this.wispSparks.push({ mesh, mat, phase: i / 8 });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(0.35, 0.35, 1);
+      this.scene.add(sprite);
+      this.wispSparks.push({ mesh: sprite, mat, phase: i / 8 });
     }
   }
 
   _buildWindLeaves() {
-    const leafGeo = new THREE.PlaneGeometry(0.32, 0.16);
-    const leafMat = new THREE.MeshBasicMaterial({
-      color: PALETTE.sand,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0
-    });
+    const leafGeo = new THREE.PlaneGeometry(0.34, 0.16);
     for (let i = 0; i < 36; i += 1) {
-      const mesh = new THREE.Mesh(leafGeo, leafMat.clone());
+      const mat = new THREE.MeshBasicMaterial({
+        color: PALETTE.sand,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0
+      });
+      const mesh = new THREE.Mesh(leafGeo, mat);
       mesh.position.set(((i % 6) - 2.5) * 14, 1 + (i % 5) * 1.4, (Math.floor(i / 6) - 2.5) * 14);
       this.scene.add(mesh);
       this.windLeaves.push({ mesh, phase: i * 0.7 });
@@ -216,6 +300,10 @@ export class IslandRenderer {
       this.worldGroup.remove(this.worldGroup.children[0]);
     }
     this.lanternViews.clear();
+    this.grassTufts = null;
+    this.grassMeta = [];
+    this.bellMesh = null;
+
     for (const view of this.moteMeshes.values()) this.scene.remove(view.group);
     this.moteMeshes.clear();
     for (const view of this.shadeViews.values()) this.scene.remove(view.group);
@@ -227,99 +315,226 @@ export class IslandRenderer {
   }
 
   _addIslandDisc(cx, cz, radius, topY, thickness = 2.2) {
-    const grassMat = new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 0.92 });
-    const sandMat = new THREE.MeshStandardMaterial({ color: PALETTE.sand, roughness: 0.95 });
+    const grassTex = getGrassTextures();
+    const sandTex = getSandTextures();
+    const stoneTex = getStoneTextures();
 
-    const disc = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius + 1.2, thickness, 56), grassMat);
+    const grassMat = new THREE.MeshStandardMaterial({
+      map: grassTex.map,
+      bumpMap: grassTex.bumpMap,
+      bumpScale: 0.08,
+      roughness: 0.9
+    });
+    const cliffMat = new THREE.MeshStandardMaterial({
+      map: stoneTex.map,
+      bumpMap: stoneTex.bumpMap,
+      bumpScale: 0.12,
+      roughness: 0.92
+    });
+    const sandMat = new THREE.MeshStandardMaterial({
+      map: sandTex.map,
+      bumpMap: sandTex.bumpMap,
+      bumpScale: 0.06,
+      roughness: 0.94
+    });
+
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius + 1.4, thickness, 60),
+      [cliffMat, grassMat, cliffMat]
+    );
     disc.position.set(cx, topY - thickness / 2, cz);
     disc.receiveShadow = true;
+    disc.castShadow = true;
     this.worldGroup.add(disc);
 
-    const rim = new THREE.Mesh(
-      new THREE.RingGeometry(Math.max(0.5, radius - 2.2), radius, 56),
-      sandMat
-    );
+    const rim = new THREE.Mesh(new THREE.RingGeometry(Math.max(0.5, radius - 2.3), radius, 60), sandMat);
     rim.rotation.x = -Math.PI / 2;
     rim.position.set(cx, topY + 0.02, cz);
     rim.receiveShadow = true;
     this.worldGroup.add(rim);
   }
 
+  _buildInstancedGrass(map) {
+    const spots = [];
+    const maxR = map.night === 3 ? 42 : map.night === 2 ? 25 : 37;
+    const centers = map.night === 2 ? [[0, 0], [70, 0]] : [[0, 0]];
+    let seed = map.night * 97 + 13;
+    const nextRand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    for (const [cx, cz] of centers) {
+      for (let i = 0; i < 120; i += 1) {
+        const ang = nextRand() * Math.PI * 2;
+        const rad = 2.5 + Math.sqrt(nextRand()) * (maxR - 4);
+        const gx = cx + Math.cos(ang) * rad;
+        const gz = cz + Math.sin(ang) * rad;
+        const h = getSurfaceHeight(map, gx, gz);
+        if (h === null || (h > 0.01 && h < 2.99)) continue;
+        if (map.night === 3 && Math.hypot(gx, gz) < 2.6) continue;
+        spots.push({
+          x: gx,
+          y: h,
+          z: gz,
+          rotY: nextRand() * Math.PI * 2,
+          scale: 0.75 + nextRand() * 0.65,
+          phase: nextRand() * Math.PI * 2
+        });
+      }
+    }
+
+    if (spots.length === 0) return;
+    const bladeGeo = new THREE.ConeGeometry(0.11, 0.42, 4);
+    bladeGeo.translate(0, 0.21, 0);
+    const bladeMat = new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 0.88 });
+    this.grassTufts = new THREE.InstancedMesh(bladeGeo, bladeMat, spots.length);
+    this.grassTufts.receiveShadow = true;
+    this.grassMeta = spots;
+
+    for (let i = 0; i < spots.length; i += 1) {
+      const s = spots[i];
+      this._dummy.position.set(s.x, s.y, s.z);
+      this._dummy.rotation.set(0, s.rotY, 0);
+      this._dummy.scale.setScalar(s.scale);
+      this._dummy.updateMatrix();
+      this.grassTufts.setMatrixAt(i, this._dummy.matrix);
+    }
+    this.grassTufts.instanceMatrix.needsUpdate = true;
+    this.worldGroup.add(this.grassTufts);
+  }
+
   _addJumpPadMesh(pad) {
     const mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(pad.radius, pad.radius * 1.15, 0.16, 20),
+      new THREE.CylinderGeometry(pad.radius, pad.radius * 1.18, 0.18, 24),
       new THREE.MeshStandardMaterial({
         color: PALETTE.goldAccent,
         emissive: PALETTE.lanternLit,
-        emissiveIntensity: 0.9
+        emissiveIntensity: 0.95
       })
     );
-    mesh.position.set(pad.pos[0], pad.pos[1] + 0.08, pad.pos[2]);
+    mesh.position.set(pad.pos[0], pad.pos[1] + 0.09, pad.pos[2]);
     this.worldGroup.add(mesh);
 
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(pad.radius * 0.75, pad.radius * 1.1, 24),
-      new THREE.MeshBasicMaterial({ color: PALETTE.lanternCore, side: THREE.DoubleSide })
+    const glow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: getGlowTexture(PALETTE.lanternCore, PALETTE.lanternLit),
+        transparent: true,
+        opacity: 0.65,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
     );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(pad.pos[0], pad.pos[1] + 0.18, pad.pos[2]);
-    this.worldGroup.add(ring);
+    glow.position.set(pad.pos[0], pad.pos[1] + 0.85, pad.pos[2]);
+    glow.scale.set(2.8, 2.8, 1);
+    this.worldGroup.add(glow);
   }
 
   rebuildMap(night) {
     this._clearMapMeshes();
+    this._camInitialized = false;
     const map = getMapConfig(night);
-    const woodMat = new THREE.MeshStandardMaterial({ color: PALETTE.wood, roughness: 0.85 });
+    const woodTex = getWoodTextures();
+    const stoneTex = getStoneTextures();
+    const grassTex = getGrassTextures();
+
+    const woodMat = new THREE.MeshStandardMaterial({
+      map: woodTex.map,
+      bumpMap: woodTex.bumpMap,
+      bumpScale: 0.08,
+      roughness: 0.84
+    });
+    const stoneMat = new THREE.MeshStandardMaterial({
+      map: stoneTex.map,
+      bumpMap: stoneTex.bumpMap,
+      bumpScale: 0.1,
+      roughness: 0.88
+    });
 
     if (night === 1) {
-      this._addIslandDisc(0, 0, 40, 0, 2.4);
-      // Wooden dock (Đảo Bến) at +Z
+      this._addIslandDisc(0, 0, 40, 0, 2.6);
+
+      // Central shrine dais + radial stone markers
+      const dais = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.3, 0.24, 16), stoneMat);
+      dais.position.y = 0.12;
+      dais.receiveShadow = true;
+      this.worldGroup.add(dais);
+
+      // Wooden dock (Đảo Bến) at +Z with posts
       for (let i = 0; i < 6; i += 1) {
         const plank = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.18, 1.0), woodMat);
         plank.position.set(0, 0.09, 36.5 + i * 1.15);
         plank.receiveShadow = true;
+        plank.castShadow = true;
         this.worldGroup.add(plank);
       }
+      for (const sx of [-1.5, 1.5]) {
+        for (const sz of [37.5, 42.2]) {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.2, 8), woodMat);
+          post.position.set(sx, 0.6, sz);
+          post.castShadow = true;
+          this.worldGroup.add(post);
+        }
+      }
     } else if (night === 2) {
-      this._addIslandDisc(0, 0, 28, 0, 2.4);
-      this._addIslandDisc(70, 0, 28, 0, 2.4);
-      // Bamboo bridge x in [26, 44], z in [-2, 2]
-      const bridge = new THREE.Mesh(new THREE.BoxGeometry(18, 0.25, 4), woodMat);
+      this._addIslandDisc(0, 0, 28, 0, 2.6);
+      this._addIslandDisc(70, 0, 28, 0, 2.6);
+
+      // Bamboo bridge x in [26, 44], z in [-2, 2] + side guard poles
+      const bridge = new THREE.Mesh(new THREE.BoxGeometry(18, 0.28, 4.0), woodMat);
       bridge.position.set(35, -0.1, 0);
       bridge.receiveShadow = true;
       bridge.castShadow = true;
       this.worldGroup.add(bridge);
-      // Betel palms (Cây cau) around islands
-      const trunkMat = woodMat;
-      const leafMat = new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 0.85 });
+
+      for (const rz of [-2.12, 2.12]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(18, 0.12, 0.12), woodMat);
+        rail.position.set(35, 0.42, rz);
+        rail.castShadow = true;
+        this.worldGroup.add(rail);
+        for (let bx = 27; bx <= 43; bx += 4) {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.65, 6), woodMat);
+          post.position.set(bx, 0.25, rz);
+          this.worldGroup.add(post);
+        }
+      }
+
+      // Multi-tiered Betel palms (Cây cau) around islands
+      const leafMat = new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 0.82 });
       for (const cx of [0, 70]) {
-        for (let i = 0; i < 6; i += 1) {
-          const ang = (i / 6) * Math.PI * 2 + 0.3;
+        for (let i = 0; i < 7; i += 1) {
+          const ang = (i / 7) * Math.PI * 2 + 0.35;
           const x = cx + Math.cos(ang) * 24;
           const z = Math.sin(ang) * 24;
-          if (Math.abs(z) < 4 && (cx === 0 ? x > 20 : x < 50)) continue;
-          const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 5.5, 7), trunkMat);
-          trunk.position.set(x, 2.75, z);
+          if (Math.abs(z) < 4.5 && (cx === 0 ? x > 19 : x < 51)) continue;
+          const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.24, 5.8, 8), woodMat);
+          trunk.position.set(x, 2.9, z);
           trunk.castShadow = true;
-          const crown = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1.5, 6), leafMat);
-          crown.position.set(x, 5.8, z);
-          crown.castShadow = true;
-          this.worldGroup.add(trunk, crown);
+          const crown1 = new THREE.Mesh(new THREE.ConeGeometry(1.45, 1.4, 7), leafMat);
+          crown1.position.set(x, 5.8, z);
+          crown1.castShadow = true;
+          const crown2 = new THREE.Mesh(new THREE.ConeGeometry(1.0, 1.3, 7), leafMat);
+          crown2.position.set(x, 6.65, z);
+          crown2.castShadow = true;
+          this.worldGroup.add(trunk, crown1, crown2);
         }
       }
     } else if (night === 3) {
-      this._addIslandDisc(0, 0, 45, 0, 2.4);
+      this._addIslandDisc(0, 0, 45, 0, 2.6);
 
-      // Tier 1 (Y=3, r=12..24, z > 0) built via ExtrudeGeometry half-annulus
+      // Tier 1 (Y=3, r=12..24, z > 0) with stone side walls + textured grass top
       const shape = new THREE.Shape();
       shape.absarc(0, 0, 24, 0, Math.PI, false);
       shape.absarc(0, 0, 12, Math.PI, 0, true);
-      const tier1Geo = new THREE.ExtrudeGeometry(shape, { depth: 3.0, bevelEnabled: false, curveSegments: 36 });
-      const tier1Mesh = new THREE.Mesh(
-        tier1Geo,
-        new THREE.MeshStandardMaterial({ color: PALETTE.grass, roughness: 0.9 })
-      );
-      tier1Mesh.rotation.x = Math.PI / 2; // Shape +Y maps to world +Z; depth extrudes downward
+      const tier1Geo = new THREE.ExtrudeGeometry(shape, { depth: 3.0, bevelEnabled: false, curveSegments: 40 });
+      const tier1GrassMat = new THREE.MeshStandardMaterial({
+        map: grassTex.map,
+        bumpMap: grassTex.bumpMap,
+        bumpScale: 0.08,
+        roughness: 0.9
+      });
+      const tier1Mesh = new THREE.Mesh(tier1Geo, [tier1GrassMat, stoneMat]);
+      tier1Mesh.rotation.x = Math.PI / 2;
       tier1Mesh.position.y = 3.0;
       tier1Mesh.receiveShadow = true;
       tier1Mesh.castShadow = true;
@@ -328,10 +543,10 @@ export class IslandRenderer {
       // Tier 2 (Y=6, r=8)
       this._addIslandDisc(0, 0, 8, 6, 6.0);
 
-      // 2 Straight Ramps at 30 deg & 150 deg (width 3m, r=24 Y=3 to r=30 Y=0)
+      // 2 Straight Ramps at 30 deg & 150 deg (width 3m, r=30 Y=0 to r=24 Y=3)
       for (const deg of [30, 150]) {
         const rad = (deg * Math.PI) / 180;
-        const len = Math.hypot(6, 3); // sqrt(36 + 9)
+        const len = Math.hypot(6, 3);
         const rampMesh = new THREE.Mesh(new THREE.BoxGeometry(len, 0.3, 3.0), woodMat);
         const midR = 27;
         rampMesh.position.set(midR * Math.cos(rad), 1.35, midR * Math.sin(rad));
@@ -341,36 +556,55 @@ export class IslandRenderer {
         rampMesh.receiveShadow = true;
         rampMesh.castShadow = true;
         this.worldGroup.add(rampMesh);
+
+        // Framing posts outside the 3m ramp width
+        const nx = -Math.sin(rad);
+        const nz = Math.cos(rad);
+        for (const side of [-1.72, 1.72]) {
+          for (const rr of [24.6, 29.6]) {
+            const h = 3 * ((30 - rr) / 6);
+            const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 6), woodMat);
+            post.position.set(rr * Math.cos(rad) + nx * side, h + 0.45, rr * Math.sin(rad) + nz * side);
+            post.castShadow = true;
+            this.worldGroup.add(post);
+          }
+        }
       }
 
-      // Bell Tower at (0, 6, 0), r=2, height=8
-      const tower = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.9, 2.0, 8.0, 16),
-        new THREE.MeshStandardMaterial({ color: '#4d4759', roughness: 0.85 })
-      );
+      // Bell Tower at (0, 6, 0), r=2, height=8 + swinging bronze bell
+      const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.0, 8.0, 20), stoneMat);
       tower.position.set(0, 10.0, 0);
       tower.castShadow = true;
       tower.receiveShadow = true;
       const bellRoof = new THREE.Mesh(
-        new THREE.ConeGeometry(2.6, 2.2, 16),
-        new THREE.MeshStandardMaterial({ color: PALETTE.mayScarf, roughness: 0.7 })
+        new THREE.ConeGeometry(2.75, 2.3, 16),
+        new THREE.MeshStandardMaterial({ color: PALETTE.mayScarf, roughness: 0.68 })
       );
-      bellRoof.position.set(0, 15.0, 0);
-      const bell = new THREE.Mesh(
-        new THREE.ConeGeometry(0.65, 1.0, 12),
-        new THREE.MeshStandardMaterial({ color: PALETTE.goldAccent, emissive: PALETTE.lanternLit, emissiveIntensity: 0.4 })
+      bellRoof.position.set(0, 15.1, 0);
+      bellRoof.castShadow = true;
+      this.bellMesh = new THREE.Mesh(
+        new THREE.ConeGeometry(0.68, 1.05, 14),
+        new THREE.MeshStandardMaterial({
+          color: PALETTE.goldAccent,
+          emissive: PALETTE.lanternLit,
+          emissiveIntensity: 0.45,
+          metalness: 0.55,
+          roughness: 0.35
+        })
       );
-      bell.position.set(0, 13.3, 0);
-      this.worldGroup.add(tower, bellRoof, bell);
+      this.bellMesh.position.set(0, 13.4, 0);
+      this.worldGroup.add(tower, bellRoof, this.bellMesh);
     }
+
+    this._buildInstancedGrass(map);
 
     for (const pad of map.jumpPads) {
       this._addJumpPadMesh(pad);
     }
 
-    // Build lanterns
-    const stoneMat = new THREE.MeshStandardMaterial({ color: '#4b4e63', roughness: 0.85 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: '#2b2438', roughness: 0.75 });
+    // Build lanterns with radial glow sprites
+    const roofMat = new THREE.MeshStandardMaterial({ color: '#2b2438', roughness: 0.72 });
+    const lanternGlowTex = getGlowTexture(PALETTE.lanternCore, PALETTE.lanternLit);
     for (const l of map.lanterns) {
       const group = new THREE.Group();
       group.position.set(l.pos[0], l.pos[1], l.pos[2]);
@@ -378,6 +612,7 @@ export class IslandRenderer {
       const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.85, 0.5, 8), stoneMat);
       pedestal.position.y = 0.25;
       pedestal.castShadow = true;
+      pedestal.receiveShadow = true;
       group.add(pedestal);
 
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 2.5, 8), woodMat);
@@ -389,19 +624,33 @@ export class IslandRenderer {
         color: PALETTE.lanternUnlit,
         emissive: PALETTE.lanternLit,
         emissiveIntensity: 0.05,
-        roughness: 0.45
+        roughness: 0.42
       });
       const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.42, 1.0, 8), coreMat);
       body.position.y = 3.0;
+      body.castShadow = true;
       group.add(body);
 
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(0.85, 0.55, 8), roofMat);
-      roof.position.y = 3.72;
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(0.88, 0.58, 8), roofMat);
+      roof.position.y = 3.74;
+      roof.castShadow = true;
       group.add(roof);
 
-      const light = new THREE.PointLight(PALETTE.lanternLit, 0, 20, 1.4);
+      const light = new THREE.PointLight(PALETTE.lanternLit, 0, 22, 1.35);
       light.position.y = 3.0;
       group.add(light);
+
+      const haloMat = new THREE.SpriteMaterial({
+        map: lanternGlowTex,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const haloSprite = new THREE.Sprite(haloMat);
+      haloSprite.position.y = 3.0;
+      haloSprite.scale.set(4.5, 4.5, 1);
+      group.add(haloSprite);
 
       const safeRingMat = new THREE.MeshBasicMaterial({
         color: PALETTE.lanternLit,
@@ -410,7 +659,7 @@ export class IslandRenderer {
         side: THREE.DoubleSide
       });
       const safeRing = new THREE.Mesh(
-        new THREE.RingGeometry(DEFAULT_TUNING.safe_radius - 0.14, DEFAULT_TUNING.safe_radius, 48),
+        new THREE.RingGeometry(DEFAULT_TUNING.safe_radius - 0.14, DEFAULT_TUNING.safe_radius, 52),
         safeRingMat
       );
       safeRing.rotation.x = -Math.PI / 2;
@@ -422,7 +671,7 @@ export class IslandRenderer {
         new THREE.MeshBasicMaterial({
           color: PALETTE.lanternCore,
           transparent: true,
-          opacity: 0.5,
+          opacity: 0.55,
           side: THREE.DoubleSide
         })
       );
@@ -432,8 +681,20 @@ export class IslandRenderer {
       group.add(progressRing);
 
       this.worldGroup.add(group);
-      this.lanternViews.set(l.id, { group, coreMat, light, safeRingMat, progressRing, wasLit: false });
+      this.lanternViews.set(l.id, {
+        group,
+        coreMat,
+        light,
+        haloMat,
+        safeRingMat,
+        progressRing,
+        wasLit: false
+      });
     }
+  }
+
+  triggerShake(amount = 0.4) {
+    this._shakeTrauma = Math.min(1, this._shakeTrauma + amount);
   }
 
   triggerPulseFx(pos) {
@@ -443,9 +704,9 @@ export class IslandRenderer {
       opacity: 0.85,
       side: THREE.DoubleSide
     });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.75, 40), mat);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.75, 44), mat);
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(pos[0], pos[1] + 0.2, pos[2]);
+    ring.position.set(pos[0], pos[1] + 0.25, pos[2]);
     this.scene.add(ring);
     this.pulseWaves.push({ mesh: ring, mat, age: 0, maxAge: 0.45 });
   }
@@ -464,6 +725,26 @@ export class IslandRenderer {
     }
   }
 
+  _spawnBurstParticles(pos, colorHex, count = 6, speed = 2.2) {
+    const geo = new THREE.SphereGeometry(0.08, 6, 6);
+    for (let i = 0; i < count; i += 1) {
+      const ang = (i / count) * Math.PI * 2 + this.elapsed;
+      const mat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.75 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(pos[0], pos[1] + 0.12, pos[2]);
+      this.scene.add(mesh);
+      this.particles.push({
+        mesh,
+        mat,
+        vx: Math.cos(ang) * speed,
+        vy: 0.9 + (i % 2) * 0.6,
+        vz: Math.sin(ang) * speed,
+        age: 0,
+        maxAge: 0.42
+      });
+    }
+  }
+
   _syncMotes(motes) {
     const activeIds = new Set(motes.map((m) => m.id));
     for (const [id, view] of this.moteMeshes.entries()) {
@@ -473,19 +754,26 @@ export class IslandRenderer {
       }
     }
 
+    const haloTex = getGlowTexture(PALETTE.moteCore, PALETTE.moteHalo);
     for (let i = 0; i < motes.length; i += 1) {
       const m = motes[i];
       let view = this.moteMeshes.get(m.id);
       if (!view) {
         const group = new THREE.Group();
         const orb = new THREE.Mesh(
-          new THREE.SphereGeometry(0.22, 10, 10),
+          new THREE.SphereGeometry(0.19, 10, 10),
           new THREE.MeshBasicMaterial({ color: PALETTE.moteCore })
         );
-        const halo = new THREE.Mesh(
-          new THREE.SphereGeometry(0.45, 10, 10),
-          new THREE.MeshBasicMaterial({ color: PALETTE.moteHalo, transparent: true, opacity: 0.35 })
+        const halo = new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: haloTex,
+            transparent: true,
+            opacity: 0.78,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+          })
         );
+        halo.scale.set(1.25, 1.25, 1);
         group.add(orb, halo);
         this.scene.add(group);
         view = { group, orb, halo, phase: i * 0.85 };
@@ -521,9 +809,9 @@ export class IslandRenderer {
           color: PALETTE.shadeBody,
           emissive: PALETTE.shadeRim,
           emissiveIntensity: 0.75,
-          roughness: 0.6
+          roughness: 0.55
         });
-        const body = new THREE.Mesh(new THREE.ConeGeometry(0.65, 1.7, 10), bodyMat);
+        const body = new THREE.Mesh(new THREE.ConeGeometry(0.65, 1.7, 12), bodyMat);
         body.position.y = 0.85;
         body.castShadow = true;
         group.add(body);
@@ -591,12 +879,12 @@ export class IslandRenderer {
         const ribbonMat = new THREE.MeshStandardMaterial({
           color: PALETTE.drifter,
           emissive: '#3c556e',
-          emissiveIntensity: 0.5,
+          emissiveIntensity: 0.55,
           side: THREE.DoubleSide
         });
-        const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 1.8), ribbonMat);
+        const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 1.85), ribbonMat);
         const orb = new THREE.Mesh(
-          new THREE.SphereGeometry(0.18, 8, 8),
+          new THREE.SphereGeometry(0.19, 8, 8),
           new THREE.MeshBasicMaterial({ color: PALETTE.moteCore })
         );
         orb.position.set(0, -0.35, 0);
@@ -631,12 +919,16 @@ export class IslandRenderer {
           new THREE.MeshStandardMaterial({
             color: PALETTE.mayScarf,
             emissive: PALETTE.mayScarf,
-            emissiveIntensity: 0.35
+            emissiveIntensity: 0.38
           })
         );
         const trim = new THREE.Mesh(
           new THREE.BoxGeometry(0.58, 0.88, 0.05),
-          new THREE.MeshStandardMaterial({ color: PALETTE.goldAccent, emissive: PALETTE.goldAccent, emissiveIntensity: 0.3 })
+          new THREE.MeshStandardMaterial({
+            color: PALETTE.goldAccent,
+            emissive: PALETTE.goldAccent,
+            emissiveIntensity: 0.35
+          })
         );
         group.add(trim, card);
         this.scene.add(group);
@@ -666,18 +958,53 @@ export class IslandRenderer {
     return { x: sx, y: sy, onScreen, angleRad, w, h };
   }
 
-  render(sim, camYawDeg, dt) {
+  render(sim, cameraInput, dt) {
     this.elapsed += dt;
 
-    // Player sync
+    const camState =
+      typeof cameraInput === 'number'
+        ? { yawDeg: cameraInput, pitchDeg: 24, dist: 10.5 }
+        : cameraInput;
+
+    // Player sync & realistic locomotion animation
     const p = sim.player.pos;
+    const horizSpeed = Math.hypot(sim.player.vel[0], sim.player.vel[2]);
     this.playerGroup.position.set(p[0], p[1], p[2]);
     this.playerGroup.rotation.y = (sim.player.facingYawDeg * Math.PI) / 180;
+
+    if (sim.player.grounded && horizSpeed > 0.3) {
+      this._walkPhase += horizSpeed * dt * 2.3;
+      this.playerVisual.position.y = Math.abs(Math.sin(this._walkPhase)) * 0.085;
+      this.playerVisual.rotation.x = Math.min(0.18, horizSpeed * 0.025);
+      this.scarfTail.rotation.x = 0.25 + Math.sin(this._walkPhase * 2) * 0.18;
+      this.hatLanternPivot.rotation.x = Math.sin(this._walkPhase) * 0.22;
+      this.hatLanternPivot.rotation.z = Math.cos(this._walkPhase * 0.5) * 0.1;
+    } else {
+      this.playerVisual.position.y *= 0.85;
+      this.playerVisual.rotation.x *= 0.85;
+      this.scarfTail.rotation.x = Math.sin(this.elapsed * 3) * 0.1;
+      this.hatLanternPivot.rotation.x = Math.sin(this.elapsed * 2.2) * 0.07;
+      this.hatLanternPivot.rotation.z = Math.cos(this.elapsed * 1.7) * 0.06;
+    }
+
+    if (this._wasGrounded && !sim.player.grounded && sim.player.vel[1] > 2) {
+      this._spawnBurstParticles(p, PALETTE.sand, 6, 1.8);
+    } else if (!this._wasGrounded && sim.player.grounded) {
+      this._spawnBurstParticles(p, PALETTE.sand, 8, 2.3);
+    }
+    this._wasGrounded = sim.player.grounded;
+
     if (sim.player.dashActiveTicks > 0) {
-      this.playerGroup.scale.set(0.85, 0.92, 1.25);
+      this.playerGroup.scale.set(0.84, 0.92, 1.28);
+      this._dashFxAccum += dt;
+      if (this._dashFxAccum >= 0.03) {
+        this._dashFxAccum = 0;
+        this._spawnBurstParticles(p, PALETTE.goldAccent, 3, 1.1);
+      }
     } else {
       this.playerGroup.scale.set(1, 1, 1);
     }
+
     this.playerLight.intensity = 1.6 + sim.player.carried * 0.35;
     this.hatLanternMat.emissiveIntensity = 1.1 + sim.player.carried * 0.25;
 
@@ -698,7 +1025,8 @@ export class IslandRenderer {
         litCount += 1;
         view.coreMat.color.set(PALETTE.lanternCore);
         view.coreMat.emissiveIntensity = 1.85;
-        view.light.intensity = 4.6;
+        view.light.intensity = 4.8;
+        view.haloMat.opacity = 0.65 + Math.sin(this.elapsed * 3.1) * 0.1;
         view.safeRingMat.opacity = 0.28 + Math.sin(this.elapsed * 2.5) * 0.06;
         view.progressRing.scale.setScalar(0.01);
         if (!view.wasLit) {
@@ -711,6 +1039,7 @@ export class IslandRenderer {
         view.coreMat.color.set(PALETTE.lanternUnlit);
         view.coreMat.emissiveIntensity = 0.08 + frac * 0.7;
         view.light.intensity = frac * 1.4;
+        view.haloMat.opacity = frac * 0.25;
         view.safeRingMat.opacity = 0;
         view.progressRing.scale.setScalar(frac > 0 ? 0.4 + frac * 0.9 : 0.01);
       }
@@ -719,12 +1048,36 @@ export class IslandRenderer {
     // Exact TICKET-02 ambient intensity formula: 0.15 + 0.55 * (lit / total)
     const litRatio = sim.lanterns.length > 0 ? litCount / sim.lanterns.length : 0;
     this.ambientLight.intensity = 0.15 + 0.55 * litRatio;
-    this.scene.fog.density = THREE.MathUtils.lerp(0.015, 0.0085, litRatio);
+    this.scene.fog.density = THREE.MathUtils.lerp(0.0145, 0.0085, litRatio);
 
     this._syncMotes(sim.motes);
     this._syncShades(sim.shades);
     this._syncDrifters(sim.drifters);
     this._syncCharms(sim.charms);
+
+    // Instanced grass sway
+    if (this.grassTufts) {
+      const windExtra = sim.windEnabled && sim.wind.active ? 0.28 : 0;
+      for (let i = 0; i < this.grassMeta.length; i += 1) {
+        const s = this.grassMeta[i];
+        this._dummy.position.set(s.x, s.y, s.z);
+        this._dummy.rotation.set(
+          Math.sin(this.elapsed * 2.2 + s.phase) * 0.12 + windExtra,
+          s.rotY,
+          Math.cos(this.elapsed * 1.9 + s.phase) * 0.08
+        );
+        this._dummy.scale.setScalar(s.scale);
+        this._dummy.updateMatrix();
+        this.grassTufts.setMatrixAt(i, this._dummy.matrix);
+      }
+      this.grassTufts.instanceMatrix.needsUpdate = true;
+    }
+
+    if (this.bellMesh) {
+      const swingSpeed = sim.windEnabled && sim.wind.active ? 6 : 1.6;
+      const swingAmp = sim.windEnabled && sim.wind.active ? 0.25 : 0.06;
+      this.bellMesh.rotation.z = Math.sin(this.elapsed * swingSpeed) * swingAmp;
+    }
 
     // Wind leaves FX (Night 3 warning or active wind)
     const showLeaves = sim.windEnabled && (sim.wind.warning || sim.wind.active);
@@ -745,7 +1098,7 @@ export class IslandRenderer {
       }
     }
 
-    // Guiding Wisp (creative addition from Phase 1)
+    // Guiding Wisp (creative addition)
     let nearestUnlit = null;
     if (sim.player.carried >= sim.tuning.lantern_cost) {
       let bestDist = Infinity;
@@ -773,7 +1126,7 @@ export class IslandRenderer {
         p[1] + 1.15 + Math.sin(u * Math.PI) * 0.65,
         p[2] + (dz / d) * (1.2 + u * span)
       );
-      w.mat.opacity = Math.sin(u * Math.PI) * 0.85;
+      w.mat.opacity = Math.sin(u * Math.PI) * 0.9;
     }
 
     // Clouds & stars
@@ -815,18 +1168,59 @@ export class IslandRenderer {
         this.skyLanterns.splice(i, 1);
       }
     }
+    for (let i = this.particles.length - 1; i >= 0; i -= 1) {
+      const pt = this.particles[i];
+      pt.age += dt;
+      if (pt.age >= pt.maxAge) {
+        this.scene.remove(pt.mesh);
+        pt.mat.dispose();
+        this.particles.splice(i, 1);
+      } else {
+        pt.mesh.position.x += pt.vx * dt;
+        pt.mesh.position.y += pt.vy * dt;
+        pt.mesh.position.z += pt.vz * dt;
+        pt.mat.opacity = (1 - pt.age / pt.maxAge) * 0.7;
+      }
+    }
 
-    // 3rd-person orbit camera
-    const theta = (camYawDeg * Math.PI) / 180;
-    const camDist = 11.5;
-    const camHeight = 6.2;
-    this.camera.position.set(
-      p[0] + Math.sin(theta) * camDist,
-      Math.max(1.5, p[1] + camHeight),
-      p[2] + Math.cos(theta) * camDist
+    // Smooth damped 3rd-person orbit camera with pitch, scroll zoom, FOV kick, and hit shake
+    const yawRad = (camState.yawDeg * Math.PI) / 180;
+    const pitchRad = (camState.pitchDeg * Math.PI) / 180;
+    const horiz = camState.dist * Math.cos(pitchRad);
+    const vert = camState.dist * Math.sin(pitchRad);
+
+    const desiredTarget = new THREE.Vector3(p[0], Math.max(-2, p[1] + 1.35), p[2]);
+    const desiredPos = new THREE.Vector3(
+      p[0] + Math.sin(yawRad) * horiz,
+      Math.max(1.2, p[1] + 1.1 + vert),
+      p[2] + Math.cos(yawRad) * horiz
     );
-    this.camera.lookAt(p[0], Math.max(-2, p[1] + 1.35), p[2]);
 
+    if (!this._camInitialized) {
+      this._camPos.copy(desiredPos);
+      this._camTarget.copy(desiredTarget);
+      this._camInitialized = true;
+    } else {
+      const alpha = 1 - Math.exp(-16 * Math.min(0.05, dt));
+      this._camPos.lerp(desiredPos, alpha);
+      this._camTarget.lerp(desiredTarget, alpha);
+    }
+
+    const targetFov = sim.player.dashActiveTicks > 0 || sim.player.launched ? 63 : 55;
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-10 * dt));
+      this.camera.updateProjectionMatrix();
+    }
+
+    this.camera.position.copy(this._camPos);
+    if (this._shakeTrauma > 0.001) {
+      const s = this._shakeTrauma * this._shakeTrauma * 0.35;
+      this.camera.position.x += Math.sin(this.elapsed * 65) * s;
+      this.camera.position.y += Math.cos(this.elapsed * 53) * s;
+      this._shakeTrauma = Math.max(0, this._shakeTrauma - dt * 2.2);
+    }
+
+    this.camera.lookAt(this._camTarget);
     this.renderer.render(this.scene, this.camera);
   }
 
