@@ -1,38 +1,26 @@
-# Phase 1 — Nhật ký dùng AI & Đánh giá (AI Log & Evaluation)
+# Nhật ký dùng AI & Đánh giá (AI Log & Evaluation)
 
-## 1. Quy trình làm việc với AI trong Phase 1
+## Phase 1 — Đêm 1: Đảo Bến (PRD-0)
 
-1. **Đọc & Lập kế hoạch trước (Plan-first)**: Đọc toàn bộ PRD-0 và Test Contract v1.0, chốt toàn bộ bộ số `tuning`, kiến trúc tách `src/sim/` (thuần JS ESM 60Hz) khỏi `src/game/` (Three.js + Web Audio + HUD) trước khi viết dòng code nào.
-2. **Xây dựng theo từng commit nhỏ**:
-   - Commit 1: `package.json`, `game.contract.json`, `AGENTS.md`, `.agents/skills/verify-phase/SKILL.md`, `.githooks/pre-commit`.
-   - Commit 2: `src/sim/*` + `src/headless/cli.js`.
-   - Commit 3: `index.html` + `src/game/*` + build Vite.
-   - Commit 4: 6 kịch bản scenario, unit tests, contract tests, `scripts/verify.js`, GitHub Actions CI.
-   - Commit 5: Tài liệu giả định, nhật ký AI, bằng chứng thật, `README.md`, `LICENSE`, `CREDITS.md`.
-3. **Harness AI đã dùng**:
-   - `AGENTS.md`: quy tắc tách tuyệt đối `src/sim/` khỏi render/ngẫu nhiên không kiểm soát, quy tắc đồng bộ `game.contract.json`.
-   - `.agents/skills/verify-phase/SKILL.md`: chuẩn hóa quy trình chạy `npm run verify` và ghi bằng chứng thật trước khi gắn tag.
-   - `.githooks/pre-commit`: chạy `npm test` tự động trước mỗi commit.
-   - `.github/workflows/ci.yml`: tự động chạy `npm run verify` trên Ubuntu Node 22 khi push/PR.
+### 1. Quy trình làm việc với AI
+- **Plan-first**: Chốt `tuning` và tách `src/sim/` khỏi `src/game/` ngay từ đầu.
+- **Harness**: `AGENTS.md`, `.agents/skills/verify-phase/SKILL.md`, `.githooks/pre-commit`, `.github/workflows/ci.yml`.
+- **Lỗi đã sửa**: Test 8 thiếu thời gian sống tới tick 900; Test 15 chưa reset phím `pulse: false`; Test 17 quét trúng comment JSDoc.
 
-## 2. Tiết kiệm token & chi phí (Token Discipline)
+---
 
-- **Ước tính tiêu thụ Phase 1**: ~1 lượt lập kế hoạch chi tiết + 5 lượt thực thi gộp song song các lệnh đọc/viết độc lập; tổng ngữ cảnh rất gọn vì không dùng TypeScript/build trung gian cho logic lõi và không cài thêm framework UI nặng (React/Tailwind).
-- **Cách tiết kiệm**:
-  - Giữ `AGENTS.md` dưới 30 dòng, chỉ ghi lệnh và bất biến bắt buộc.
-  - Viết `src/sim/` bằng JavaScript ESM chuẩn chạy trực tiếp trên cả Node.js lẫn Vite mà không cần bước compile riêng.
-  - Gộp nhiều thao tác đọc/tạo file độc lập trong cùng một lượt gọi công cụ; không lặp lại lệnh kiểm tra nếu chưa có chỉnh sửa mới.
+## Phase 2 — Ba hòn đảo (`TICKET-02` / Contract `v1.1`)
 
-## 3. Lỗi phát hiện & cách chỉnh sửa trong Phase 1
+### 1. Quy trình & cập nhật Harness
+1. Cập nhật `AGENTS.md` và `.agents/skills/verify-phase/SKILL.md` bổ sung chuẩn `v1.1`, 3 bản đồ (`src/sim/maps.js`), thứ tự 12 bước trong tick, tên trạng thái Bóng Mực chuẩn (`spawning`, `wander`, `chase`, `recoil`, `stunned`) và ngưỡng hiệu năng `<= 30s` cho `21.600` tick.
+2. Nâng cấp `src/sim/` và `src/headless/cli.js` trước, rồi mới đồng bộ toàn bộ 3D renderer/HUD/Audio (`src/game/`) và 26 bài test (`tests/`).
 
-| Vấn đề phát hiện khi chạy test | Nguyên nhân | Cách sửa & bài học |
+### 2. Lỗi phát hiện & cách sửa trong Phase 2
+| Lỗi phát hiện | Nguyên nhân | Cách khắc phục & phòng ngừa |
 |---|---|---|
-| Lỗi `git commit` trong sandbox (`index.lock` permission denied) | Sandbox giới hạn ghi vào `.git/` | Tách lệnh git khỏi bước cài đặt/kiểm thử để chạy sạch |
-| Test 8 (`shade_spawned` trong `--ticks 950`) ban đầu fail | Khi đứng yên không input ở Đêm 1 mặc định, 2 Bóng Mực chạm hết 3 ngọn lửa vào khoảng tick 565 trước khi tới mốc tick 900 | Giữ test determinism ở 600 tick mặc định và thêm kịch bản sống sót (`flames: 10`) 950 tick để kiểm chứng `shade_spawned` chính xác tại tick 900 |
-| Test 15 (`pulse`) fail ở lần gọi thứ 2 | Chưa nhả phím (`pulse: false`) giữa hai lần gọi `step({ pulse: true })` nên cạnh lên `false -> true` không xảy ra | Sửa test gửi `step({ pulse: false })` ở giữa — đồng thời xác nhận logic edge-trigger hoạt động đúng |
-| Test 17 kiểm tra từ cấm trong `src/sim/` báo lỗi ở `prng.js` | Quét chuỗi thô bắt trúng dòng comment JSDoc `"Never delegates to Math.random()"` | Lọc bỏ comment `/* ... */` và `// ...` trước khi quét regex mã thực thi |
+| Scenario 07 (`snap11.pos[1] !== snap22.pos[1]`: `0.861 !== 0.856`) | Giảm `dashActiveTicks` (`1 -> 0`) trước khi kiểm tra nhánh giữ độ cao trên không ở tick thứ 12 của Lướt | Lưu cờ `const isDashing = this.player.dashActiveTicks > 0` đầu bước di chuyển để cả 12 tick đều giữ nguyên độ cao |
+| Nguy cơ khe hở ở mép dốc `r=24` Đêm 3 & offset `y` của Bóng Mực scenario | Kiểm tra đường nối `r=24` ở mép rộng `3m` (`r = sqrt(24²+1.5²) = 24.047 > 24`) và ép `shade.pos[1] = 1.0` | Mở rộng vùng đệm dốc `s ∈ [23.8, 30]` và giữ nguyên `yOffset = item.pos[1] - surfY` khi nạp scenario |
 
-## 4. Đánh giá Phase 1 (Evaluation)
-
-- **Đạt**: Toàn bộ Test Contract v1.0 (headless CLI, schema validation exit code 2, 60Hz fixed tick, tọa độ XZ, làm tròn 3 chữ số, tính tất định SHA-256 giống nhau tuyệt đối, bundle Vite 3D sạch).
-- **Giới hạn ghi nhận trung thực**: Trong môi trường CLI không có màn hình tương tác trực tiếp của người dùng, khung hình WebGL thực tế được kiểm chứng thông qua bundle production (`npm run build`) và kiến trúc tách lớp; cần người dùng mở `npm run dev` để chơi thử trực quan trước khi gắn tag `phase-1`.
+### 3. Tiết kiệm token & Đánh giá Phase 2
+- **Tiết kiệm token**: Tái sử dụng nguyên kiến trúc `LanternIslandSim` + `IslandRenderer` từ Phase 1 thay vì viết lại từ đầu; gộp viết song song 13 scenario và bộ test; dùng hình học thủ tục nhẹ (`three`) giữ runtime 21.600 tick chỉ `187 ms`.
+- **Đánh giá**: Toàn bộ 26 test, tính tất định 3 Đêm, hiệu năng `187 ms <= 30.000 ms`, và build Vite đều đạt. Đo FPS trình duyệt `1280x720` cần chạy thực tế trên máy có GPU/WebGL qua `npm run dev`.
