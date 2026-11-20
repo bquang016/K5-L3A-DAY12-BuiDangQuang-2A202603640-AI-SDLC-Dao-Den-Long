@@ -97,6 +97,8 @@ export class GameHud {
     this.flashTimer = 0;
     this.shadeAlert = null; // { id, pos, timer }
     this.settingsOrigin = 'menu';
+    this.leaderboardOrigin = 'menu';
+    this.guideOrigin = 'menu';
     this.listeningAction = null;
     this._keyCaptureHandler = null;
 
@@ -186,21 +188,146 @@ export class GameHud {
 
       <!-- Main Menu -->
       <div class="modal-backdrop" id="menu-modal">
-        <div class="modal-card">
-          <h1>Đảo Đèn Lồng</h1>
-          <p>Giữ ánh sáng qua Ba Hòn Đảo cho tới Bình Minh</p>
-          <div class="btn-col">
-            <button class="primary-btn" id="btn-campaign">Chơi chuỗi 3 Đêm (Từ Đêm 1)</button>
-            <div class="btn-row">
-              <button class="secondary-btn" data-night="1">Đêm 1 · Đảo Bến</button>
-              <button class="secondary-btn" data-night="2">Đêm 2 · Đảo Cau</button>
-              <button class="secondary-btn" data-night="3">Đêm 3 · Đảo Chuông</button>
-            </div>
-            <div class="btn-row">
-              <button class="secondary-btn" id="btn-menu-leaderboard">Bảng xếp hạng</button>
-              <button class="secondary-btn" id="btn-menu-settings">Cài đặt & Phím</button>
+        <div class="modal-card menu-card">
+          <div class="menu-brand">
+            <div class="menu-logo-icon">${SVG_LANTERN}</div>
+            <h1 class="menu-title">ĐẢO ĐÈN LỒNG</h1>
+            <p class="menu-tagline">Hành trình người giữ đèn nhỏ tuổi giữa biển sương đêm</p>
+            <div class="menu-badges">
+              <span class="menu-badge-pill">Bản phát hành v1.0.0</span>
+              <span class="menu-badge-pill">Chiến Dịch 3 Đêm</span>
+              <span class="menu-badge-pill">Mô Phỏng Chuẩn 60Hz</span>
             </div>
           </div>
+
+          <button class="hero-campaign-btn" id="btn-campaign" type="button">
+            <div class="hero-title">🌟 Bắt Đầu Chiến Dịch (Chuỗi 3 Đêm)</div>
+            <div class="hero-sub">Hành trình trọn vẹn từ Đêm 1 · Tính tổng điểm &amp; ghi danh Bảng Xếp Hạng</div>
+          </button>
+
+          <div class="menu-nav-grid">
+            <button class="nav-card-btn" id="btn-menu-levels" type="button">
+              <div class="nav-card-title">🗺️ Chọn Màn Chơi</div>
+              <div class="nav-card-desc">Chơi riêng Đêm 1 (Đảo Bến), Đêm 2 (Đảo Cau) hoặc Đêm 3 (Đảo Chuông).</div>
+            </button>
+            <button class="nav-card-btn" id="btn-menu-leaderboard" type="button">
+              <div class="nav-card-title">🏆 Bảng Xếp Hạng</div>
+              <div class="nav-card-desc">Vinh danh Top 10 kỷ lục người giữ đèn xuất sắc nhất.</div>
+            </button>
+            <button class="nav-card-btn" id="btn-menu-guide" type="button">
+              <div class="nav-card-title">📜 Hướng Dẫn Luật Chơi</div>
+              <div class="nav-card-desc">Cẩm nang đom đóm, châm dầu khi &lt;30, Bóng Mực, Tỏa Sáng và Gió Lạc.</div>
+            </button>
+            <button class="nav-card-btn" id="btn-menu-settings" type="button">
+              <div class="nav-card-title">⚙️ Cài Đặt &amp; Phím</div>
+              <div class="nav-card-desc">Tùy chỉnh âm lượng, độ nhạy chuột, ẩn chuột 360°, trợ năng và đổi phím.</div>
+            </button>
+          </div>
+
+          <div class="menu-footer">
+            <div class="menu-hotkeys">
+              <strong>Phím tắt:</strong> [WASD] Đi · [Space] Nhảy · [Shift] Lướt · [E] Thắp/Châm dầu · [Q] Tỏa Sáng · [P/Esc] Dừng
+            </div>
+            <div class="menu-footer-actions">
+              <button class="secondary-btn" id="btn-menu-mouse-toggle" type="button" style="padding:6px 12px;font-size:calc(15px * var(--ui-scale));">
+                [C] Ẩn chuột 360°: Bật
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Level Select Modal -->
+      <div class="modal-backdrop hidden" id="level-select-modal">
+        <div class="modal-card" style="width:min(860px, 95vw);">
+          <h2>Chọn Màn Chơi</h2>
+          <p>Lựa chọn hòn đảo bạn muốn chinh phục:</p>
+          <div class="level-cards-grid">
+            <div class="level-card">
+              <div>
+                <div class="level-card-header">Đêm 1 · Đảo Bến</div>
+                <div class="level-card-pill">240s (4:00) · 5 Đèn Lớn</div>
+                <div class="level-card-desc">
+                  Hòn đảo tròn thanh bình giữa biển sương đêm. Thu thập đom đóm, thắp và giữ sáng ít nhất <strong>3/5 đèn</strong> tới bình minh.
+                </div>
+              </div>
+              <button class="primary-btn" type="button" data-night="1">Chơi Đêm 1</button>
+            </div>
+            <div class="level-card">
+              <div>
+                <div class="level-card-header">Đêm 2 · Đảo Cau</div>
+                <div class="level-card-pill">270s (4:30) · 6 Đèn Lớn</div>
+                <div class="level-card-desc">
+                  Địa hình uốn lượn 3 gò đồi nối bằng cầu tre và bệ phóng. Gió giật bất ngờ và Bùa Gió tăng tốc. Giữ ít nhất <strong>4/6 đèn</strong>.
+                </div>
+              </div>
+              <button class="primary-btn" type="button" data-night="2">Chơi Đêm 2</button>
+            </div>
+            <div class="level-card">
+              <div>
+                <div class="level-card-header">Đêm 3 · Đảo Chuông</div>
+                <div class="level-card-pill">300s (5:00) · 7 Đèn Lớn</div>
+                <div class="level-card-desc">
+                  Hòn đảo bậc thang hùng vĩ với Tháp Chuông cổ kính. Sương đen dữ dội, gió thổi liên miên. Giữ ít nhất <strong>5/7 đèn</strong> tới rạng đông.
+                </div>
+              </div>
+              <button class="primary-btn" type="button" data-night="3">Chơi Đêm 3</button>
+            </div>
+          </div>
+          <button class="secondary-btn" id="btn-levels-back" type="button">← Quay lại Menu Chính</button>
+        </div>
+      </div>
+
+      <!-- Guide Modal -->
+      <div class="modal-backdrop hidden" id="guide-modal">
+        <div class="modal-card" style="width:min(780px, 95vw);">
+          <h2>Cẩm Nang Người Giữ Đèn</h2>
+          <p>Quy tắc sinh tồn và bảo vệ ánh sáng Đảo Đèn Lồng</p>
+          <div class="guide-grid">
+            <div class="guide-item">
+              <div class="guide-title">🪔 1. Thu Thập Đom Đóm &amp; Thắp Đèn</div>
+              <div class="guide-text">
+                Chạy khắp đảo để nhặt đom đóm (tự động nhặt khi lại gần). Đến gần Đèn Lồng bấm <strong>[E]</strong> hoặc <strong>[F]</strong> để nạp ánh sáng.
+                Đèn mới cần <strong>10 đom đóm</strong>. Thắp càng nhiều đèn, túi ánh sáng của Mây càng mở rộng (tối đa mang được 20 đom đóm).
+              </div>
+            </div>
+            <div class="guide-item">
+              <div class="guide-title">⏳ 2. Hao Dầu &amp; Châm Dầu (Contract v1.3)</div>
+              <div class="guide-text">
+                Đèn đang sáng sẽ tiêu hao dần <strong>1.0 dầu mỗi giây</strong> (100 → 0 trong 100 giây). Đến gần đèn đang sáng bấm <strong>[E]</strong> để châm dầu (mỗi đom đóm nạp +10 dầu).
+                Nếu để đèn cạn dầu (0%), đèn sẽ tắt! Đèn từng sáng chỉ cần <strong>5 đom đóm</strong> để thắp lại (+40 điểm).
+              </div>
+            </div>
+            <div class="guide-item">
+              <div class="guide-title">⚠ 3. Cảnh Báo Nguy Hiểm Khi Dầu &lt; 30</div>
+              <div class="guide-text">
+                Khi dầu xuống dưới 30%, <strong>vòng an toàn 6m sẽ biến mất</strong> và đèn nhấp nháy báo động! Bóng Mực sẽ lao tới bám vào đèn để hút cạn dầu.
+                Hãy ưu tiên châm dầu ngay khi thấy đèn nhấp nháy vàng để khôi phục vùng an toàn!
+              </div>
+            </div>
+            <div class="guide-item">
+              <div class="guide-title">👾 4. Bóng Mực &amp; Kỹ Năng Tỏa Sáng [Q]</div>
+              <div class="guide-text">
+                Bóng Mực lẩn khuất trong sương đen. Bị chúng chạm vào sẽ mất 1 Ngọn Lửa (mất hết 3 ngọn lửa sẽ thất bại).
+                Bấm <strong>[Q]</strong> để Tỏa Sáng (tốn 3 đom đóm): đẩy lùi và làm choáng Bóng Mực trong 3.5 giây (+5 điểm). Đặc biệt, Tỏa Sáng giải cứu đèn đang bị hút dầu được thưởng <strong>+15 điểm</strong>!
+              </div>
+            </div>
+            <div class="guide-item">
+              <div class="guide-title">💨 5. Lướt Nhanh [Shift] &amp; Gió Lạc</div>
+              <div class="guide-text">
+                Bấm <strong>[Shift]</strong> để lướt nhanh 14 m/s né đòn tức thì (hồi chiêu 1.5s). Ở Đêm 2 &amp; 3, khi có cảnh báo gió, hãy bám chắc mặt đất để không bị thổi bay.
+                Nhặt <strong>Bùa Gió</strong> sẽ giúp Mây tăng tốc chạy và lướt không hồi chiêu trong 10 giây!
+              </div>
+            </div>
+            <div class="guide-item">
+              <div class="guide-title">🖱️ 6. Góc Nhìn 3D &amp; Ẩn Chuột Xoay 360°</div>
+              <div class="guide-text">
+                Bấm <strong>[C]</strong> để bật chế độ ẩn chuột. Khi bật, nhấp chuột vào game để khóa con trỏ và tự do xoay góc nhìn 360° bằng chuột như game hành động 3D.
+                Bấm <strong>[Esc]</strong> hoặc <strong>[P]</strong> bất cứ lúc nào để tạm dừng và chỉnh phím/âm lượng.
+              </div>
+            </div>
+          </div>
+          <button class="primary-btn" id="btn-guide-close" type="button">Đã Hiểu</button>
         </div>
       </div>
 
@@ -220,6 +347,7 @@ export class GameHud {
           <div class="btn-col">
             <button class="primary-btn" id="btn-resume">Tiếp tục</button>
             <button class="secondary-btn" id="btn-pause-restart">Chơi lại Đêm</button>
+            <button class="secondary-btn" id="btn-pause-guide">Hướng dẫn luật chơi</button>
             <button class="secondary-btn" id="btn-pause-settings">Cài đặt & Phím</button>
             <button class="secondary-btn" id="btn-pause-menu">Về menu</button>
           </div>
@@ -342,11 +470,15 @@ export class GameHud {
     this.elShadeArrow = this.root.querySelector('#hud-shade-arrow');
 
     this.menuModal = this.root.querySelector('#menu-modal');
+    this.levelSelectModal = this.root.querySelector('#level-select-modal');
+    this.guideModal = this.root.querySelector('#guide-modal');
     this.introModal = this.root.querySelector('#intro-modal');
     this.pauseModal = this.root.querySelector('#pause-modal');
     this.settingsModal = this.root.querySelector('#settings-modal');
     this.leaderboardModal = this.root.querySelector('#leaderboard-modal');
     this.endModal = this.root.querySelector('#end-modal');
+    this.btnMenuMouseToggle = this.root.querySelector('#btn-menu-mouse-toggle');
+    this.btnLbClose = this.root.querySelector('#btn-lb-close');
 
     this.volSlider = this.root.querySelector('#set-vol');
     this.volLabel = this.root.querySelector('#set-vol-val');
@@ -372,14 +504,40 @@ export class GameHud {
       this.menuModal.classList.add('hidden');
       this.callbacks.onStartCampaign?.();
     });
+    this.root.querySelector('#btn-menu-levels').addEventListener('click', () => {
+      this.menuModal.classList.add('hidden');
+      this.levelSelectModal.classList.remove('hidden');
+    });
+    this.root.querySelector('#btn-levels-back').addEventListener('click', () => {
+      this.levelSelectModal.classList.add('hidden');
+      this.menuModal.classList.remove('hidden');
+    });
     this.root.querySelectorAll('[data-night]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const n = Number.parseInt(btn.dataset.night, 10);
+        this.levelSelectModal.classList.add('hidden');
         this.menuModal.classList.add('hidden');
         this.callbacks.onSelectNight?.(n);
       });
     });
+    this.root.querySelector('#btn-menu-guide').addEventListener('click', () => {
+      this.guideOrigin = 'menu';
+      this.menuModal.classList.add('hidden');
+      this.guideModal.classList.remove('hidden');
+    });
+    this.root.querySelector('#btn-pause-guide').addEventListener('click', () => {
+      this.guideOrigin = 'pause';
+      this.pauseModal.classList.add('hidden');
+      this.guideModal.classList.remove('hidden');
+    });
+    this.root.querySelector('#btn-guide-close').addEventListener('click', () => {
+      this.guideModal.classList.add('hidden');
+      if (this.guideOrigin === 'pause') this.pauseModal.classList.remove('hidden');
+      else this.menuModal.classList.remove('hidden');
+    });
     this.root.querySelector('#btn-menu-leaderboard').addEventListener('click', () => {
+      this.leaderboardOrigin = 'menu';
+      this.menuModal.classList.add('hidden');
       this.callbacks.onOpenLeaderboard?.();
     });
     this.root.querySelector('#btn-menu-settings').addEventListener('click', () => {
@@ -387,6 +545,12 @@ export class GameHud {
       this.menuModal.classList.add('hidden');
       this.settingsModal.classList.remove('hidden');
     });
+    if (this.btnMenuMouseToggle) {
+      this.btnMenuMouseToggle.addEventListener('click', () => {
+        this.lockCheckbox.checked = !this.lockCheckbox.checked;
+        emitSettings();
+      });
+    }
     this.root.querySelector('#btn-intro-go').addEventListener('click', () => {
       this.introModal.classList.add('hidden');
       this.callbacks.onBeginNightPlay?.();
@@ -446,11 +610,18 @@ export class GameHud {
       else this.menuModal.classList.remove('hidden');
     });
 
-    this.root.querySelector('#btn-lb-close').addEventListener('click', () => {
+    this.btnLbClose.addEventListener('click', () => {
       this.leaderboardModal.classList.add('hidden');
+      if (this.leaderboardOrigin === 'end') {
+        this.endModal.classList.remove('hidden');
+      } else {
+        this.menuModal.classList.remove('hidden');
+      }
     });
 
     this.root.querySelector('#btn-end-leaderboard').addEventListener('click', () => {
+      this.leaderboardOrigin = 'end';
+      this.endModal.classList.add('hidden');
       this.callbacks.onOpenLeaderboard?.();
     });
 
@@ -545,6 +716,9 @@ export class GameHud {
     this.ltCheckbox.checked = Boolean(settings.largeText);
 
     this.elLockBadge.textContent = `[C] Ẩn chuột: ${settings.pointerLockEnabled ? 'Bật' : 'Tắt (Kéo chuột)'}`;
+    if (this.btnMenuMouseToggle) {
+      this.btnMenuMouseToggle.textContent = `[C] Ẩn chuột 360°: ${settings.pointerLockEnabled ? 'Bật' : 'Tắt'}`;
+    }
     document.body.classList.toggle('colorblind', Boolean(settings.colorblindMode));
     document.body.classList.toggle('reduced-motion', Boolean(settings.reducedMotion));
     document.body.classList.toggle('large-text', Boolean(settings.largeText));
@@ -592,6 +766,10 @@ export class GameHud {
         </table>
       `;
     }
+    if (this.btnLbClose) {
+      this.btnLbClose.textContent =
+        this.leaderboardOrigin === 'end' ? '← Quay lại Kết quả' : '← Quay lại Menu Chính';
+    }
     this.leaderboardModal.classList.remove('hidden');
   }
 
@@ -627,6 +805,8 @@ export class GameHud {
     this.endModal.classList.add('hidden');
     this.settingsModal.classList.add('hidden');
     this.leaderboardModal.classList.add('hidden');
+    if (this.levelSelectModal) this.levelSelectModal.classList.add('hidden');
+    if (this.guideModal) this.guideModal.classList.add('hidden');
     this.menuModal.classList.remove('hidden');
   }
 
@@ -648,6 +828,7 @@ export class GameHud {
       this._cancelListening();
       this.pauseModal.classList.add('hidden');
       this.settingsModal.classList.add('hidden');
+      if (this.guideModal) this.guideModal.classList.add('hidden');
     }
   }
 
