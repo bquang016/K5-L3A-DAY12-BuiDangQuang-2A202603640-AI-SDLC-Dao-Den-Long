@@ -1,14 +1,17 @@
 {
   "name": "dao-den-long",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Đảo Đèn Lồng — 3D storybook lantern-keeper game with deterministic 60Hz headless simulation",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "start": "node scripts/run.js",
     "preview": "vite preview",
     "headless": "node src/headless/cli.js",
+    "bench": "node scripts/bench.js",
+    "soak": "node --max-semi-space-size=1 --no-concurrent-recompilation --optimize-for-size --expose-gc scripts/soak.js",
     "test": "node --test tests/unit.test.js tests/contract.test.js",
     "verify": "node scripts/verify.js"
   },
